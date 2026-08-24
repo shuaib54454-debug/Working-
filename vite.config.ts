@@ -7,10 +7,10 @@ export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
     optimizeDeps: {
-      include: ['react', 'react-dom'],
+      include: ['react', 'react-dom', 'react-is'],
     },
     resolve: {
-      dedupe: ['react', 'react-dom'],
+      dedupe: ['react', 'react-dom', 'react-is'],
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
