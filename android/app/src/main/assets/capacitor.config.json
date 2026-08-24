@@ -1,6 +1,6 @@
 {
 	"appId": "com.shuayb.recruitment",
-	"appName": "وكالة شعيب للتوظيف",
+	"appName": "شُعيب للتوظيف",
 	"webDir": "dist",
 	"server": {
 		"androidScheme": "https",

@@ -10,14 +10,24 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Shuayb Trade Bridge" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-CUfEQl7r.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BcD-jCO5.css">
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(reg => console.log('PWA ServiceWorker registered:', reg.scope))
+            .catch(err => console.warn('PWA ServiceWorker registration failed:', err));
+        });
+      }
+    </script>
+    <script type="module" crossorigin src="/assets/index-ttdRlv_T.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BjGBmbKe.css">
   </head>
   <body class="bg-[#fdfcfb] text-[#1a1c1e] antialiased selection:bg-[#c9a84c]/20 selection:text-[#172a46]">
     <div id="root"></div>
