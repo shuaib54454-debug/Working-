@@ -32,15 +32,14 @@ jobs:
       - name: 📥 Checkout Codebase
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node.js 20.x
+      - name: 🟢 Setup Node.js 22.x (LTS)
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: 22
 
       - name: 📦 Install Node Dependencies
         run: |
-          npm ci || npm install
+          npm install --legacy-peer-deps
 
       - name: 🌐 Build Web Application (Vite)
         run: |
