@@ -48,7 +48,7 @@ jobs:
       - name: 📱 Sync Android Platform (Capacitor)
         run: |
           npx cap sync android
-          node scripts/generate-android-assets.js
+          node scripts/generate-android-assets.cjs
 
       - name: ☕ Setup Java 21 (Temurin)
         uses: actions/setup-java@v4
