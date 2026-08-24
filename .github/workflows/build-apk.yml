@@ -1,0 +1,161 @@
+name: Build & Sign Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'نوع البناء (release أو debug)'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-sign:
+    name: 🚀 Build & Sign Shuayb Recruitment APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install Node Dependencies
+        run: |
+          npm ci || npm install
+
+      - name: 🌐 Build Web Application (Vite)
+        run: |
+          npm run build:web
+
+      - name: 📱 Sync Android Platform (Capacitor)
+        run: |
+          npx cap sync android
+
+      - name: ☕ Setup Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: 🤖 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 🔑 Set Executable Permissions on Gradlew
+        run: |
+          chmod +x ./android/gradlew
+
+      # ----------------- Debug Flow -----------------
+      - name: 🔨 Build Debug APK
+        if: "${{ github.event.inputs.build_type == 'debug' }}"
+        run: |
+          cd android
+          ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: 📤 Upload Debug APK Artifact
+        if: "${{ github.event.inputs.build_type == 'debug' }}"
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuayb-recruitment-app-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      # ----------------- Release Flow with Keystore Signing -----------------
+      - name: 🔐 Decode & Load Keystore Secret
+        if: "${{ github.event.inputs.build_type != 'debug' }}"
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > android/app/shuayb-release-key.jks
+            FILE_SIZE=$(wc -c < android/app/shuayb-release-key.jks)
+            echo "✅ Keystore decoded successfully. Size: $FILE_SIZE bytes"
+            if [ "$FILE_SIZE" -lt 100 ]; then
+              echo "⚠️ Warning: Keystore file size is unusually small. Check ANDROID_KEYSTORE_BASE64 secret."
+            fi
+            echo "HAS_KEYSTORE=true" >> $GITHUB_ENV
+          else
+            echo "⚠️ ANDROID_KEYSTORE_BASE64 is not set in repository secrets. Building unsigned release APK."
+            echo "HAS_KEYSTORE=false" >> $GITHUB_ENV
+          fi
+
+      - name: 🔨 Assemble Release APK
+        if: "${{ github.event.inputs.build_type != 'debug' }}"
+        env:
+          ANDROID_KEYSTORE_FILE: "shuayb-release-key.jks"
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd android
+          ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: 🔍 Verify Signature with apksigner
+        if: "${{ github.event.inputs.build_type != 'debug' }}"
+        run: |
+          SIGNED_APK="android/app/build/outputs/apk/release/app-release.apk"
+          UNSIGNED_APK="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          
+          if [ -f "$SIGNED_APK" ]; then
+            TARGET_APK="$SIGNED_APK"
+            echo "Found signed APK: $TARGET_APK"
+          elif [ -f "$UNSIGNED_APK" ]; then
+            TARGET_APK="$UNSIGNED_APK"
+            echo "Found unsigned APK: $TARGET_APK"
+          else
+            echo "❌ Error: No release APK generated in outputs!"
+            exit 1
+          fi
+
+          echo "=========================================="
+          echo "Verifying APK Signature with apksigner..."
+          echo "=========================================="
+          
+          APKSIGNER=$(find $ANDROID_SDK_ROOT/build-tools -name apksigner 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$APKSIGNER" ]; then
+            if $APKSIGNER verify --verbose "$TARGET_APK"; then
+              echo "------------------------------------------"
+              echo "✅ Verification Status: SIGNED (Verified successfully)"
+              echo "------------------------------------------"
+            else
+              echo "------------------------------------------"
+              echo "⚠️ Verification Status: NOT SIGNED (Check Keystore secrets)"
+              echo "------------------------------------------"
+            fi
+          else
+            echo "apksigner not found in path, APK existence verified: OK"
+          fi
+
+      - name: 📤 Upload Release APK Artifact
+        if: "${{ github.event.inputs.build_type != 'debug' }}"
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuayb-recruitment-app-release
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      - name: 🧹 Secure Keystore Cleanup
+        if: always()
+        run: |
+          rm -f android/app/shuayb-release-key.jks
+          echo "🔒 Keystore secure cleanup completed."

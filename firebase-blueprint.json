@@ -1,0 +1,75 @@
+{
+  "entities": {
+    "Candidate": {
+      "title": "Candidate",
+      "description": "Recruitment candidate document tracking personal data, passport, stage and finances.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Candidate unique ID" },
+        "ownerUid": { "type": "string", "description": "Firebase Auth UID of the document owner" },
+        "firstName": { "type": "string", "description": "First name" },
+        "lastName": { "type": "string", "description": "Last name" },
+        "passportNumber": { "type": "string", "description": "Passport number" },
+        "passportImageUrl": { "type": "string", "description": "Cloud Storage passport photo URL" },
+        "passportStoragePath": { "type": "string", "description": "Cloud Storage path" },
+        "country": { "type": "string", "description": "Nationality / Country" },
+        "job": { "type": "string", "description": "Job profession" },
+        "gender": { "type": "string", "enum": ["male", "female"] },
+        "phone": { "type": "string", "description": "Contact phone number" },
+        "sponsorName": { "type": "string", "description": "Sponsor/Employer name" },
+        "visaNumber": { "type": "string", "description": "Visa number" },
+        "stage": { "type": "string", "description": "Current processing stage ID" },
+        "totalFees": { "type": "number", "description": "Total agreed recruitment cost" },
+        "agencyLiability": { "type": "number", "description": "Agency liability / dues deducted from fees" },
+        "archived": { "type": "boolean", "description": "Whether candidate is archived" },
+        "registrationDate": { "type": "string", "description": "Registration date" }
+      },
+      "required": ["id", "ownerUid", "firstName", "lastName", "stage", "totalFees"]
+    },
+    "GeneralExpense": {
+      "title": "GeneralExpense",
+      "description": "General operating expenses of the agency.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Expense ID" },
+        "ownerUid": { "type": "string", "description": "Firebase Auth UID of the document owner" },
+        "title": { "type": "string", "description": "Expense title or item name" },
+        "amount": { "type": "number", "description": "Amount" },
+        "category": { "type": "string", "description": "Category" },
+        "date": { "type": "string", "description": "Date of expense" },
+        "note": { "type": "string", "description": "Notes or details" }
+      },
+      "required": ["id", "ownerUid", "title", "amount", "category", "date"]
+    },
+    "AgencySettings": {
+      "title": "AgencySettings",
+      "description": "Agency configuration and preferences.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "description": "Firebase Auth UID of the document owner" },
+        "agencyName": { "type": "string", "description": "Agency name" },
+        "currency": { "type": "string", "description": "Currency code" },
+        "phone": { "type": "string", "description": "Agency phone" },
+        "email": { "type": "string", "description": "Agency email" },
+        "address": { "type": "string", "description": "Agency address" },
+        "licenseNumber": { "type": "string", "description": "Commercial license number" },
+        "nextId": { "type": "number", "description": "Next candidate ID sequence number" }
+      },
+      "required": ["ownerUid", "agencyName", "currency"]
+    }
+  },
+  "firestore": {
+    "/candidates/{candidateId}": {
+      "schema": { "$ref": "#/entities/Candidate" },
+      "description": "Collection of candidates managed by the agency."
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/GeneralExpense" },
+      "description": "Collection of general agency operating expenses."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/AgencySettings" },
+      "description": "Agency settings and configuration document."
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "وكالة شعيب للتوظيف",
+  "description": "نظام Shuayb Trade Bridge (شُعيب) لتسهيل الخدمات واستقدام الكفاءات وتسويق المنتجات الزراعية الإثيوبية، إدارة شؤون المرشحين، ماسح الجوازات بالذكاء الاصطناعي، والمالية السحابية",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

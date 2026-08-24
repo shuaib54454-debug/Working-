@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">شُعيب للتوظيف</string>
+    <string name="title_activity_main">شُعيب للتوظيف</string>
+    <string name="package_name">com.shuayb.recruitment</string>
+    <string name="custom_url_scheme">com.shuayb.recruitment</string>
+</resources>

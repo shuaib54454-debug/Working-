@@ -1,0 +1,25 @@
+{
+  "short_name": "شُعيب",
+  "name": "Shuayb Trade Bridge - وكالة شُعيب",
+  "description": "مكتب تسهيل خدمات وتسويق المنتجات الزراعية وغيرها الإثيوبية - نربط الفرص ... نصنع المستقبل",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512 any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#172a46",
+  "background_color": "#fdfcfb",
+  "lang": "ar",
+  "dir": "rtl"
+}
