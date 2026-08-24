@@ -57,21 +57,16 @@ jobs:
 
       - name: 🐘 Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
 
       - name: 🤖 Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: 🛠️ Repair and Validate Gradle Wrapper
+      - name: 🛠️ Ensure Clean Gradle Wrapper
         run: |
           cd android
-          if ! jar tf ./gradle/wrapper/gradle-wrapper.jar >/dev/null 2>&1; then
-            echo "⚠️ Corrupted gradle-wrapper.jar detected. Regenerating valid wrapper..."
-            if command -v gradle >/dev/null 2>&1; then
-              gradle wrapper --gradle-version 8.14.3
-            else
-              curl -fsSL -o ./gradle/wrapper/gradle-wrapper.jar "https://raw.githubusercontent.com/ionic-team/capacitor/main/android-template/gradle/wrapper/gradle-wrapper.jar"
-            fi
-          fi
+          gradle wrapper --gradle-version 8.14.3
           chmod +x ./gradlew
 
       # ----------------- Debug Flow -----------------
