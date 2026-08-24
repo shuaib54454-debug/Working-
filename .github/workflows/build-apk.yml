@@ -54,14 +54,25 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-          cache: 'gradle'
+
+      - name: 🐘 Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: 🤖 Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: 🔑 Set Executable Permissions on Gradlew
+      - name: 🛠️ Repair and Validate Gradle Wrapper
         run: |
-          chmod +x ./android/gradlew
+          cd android
+          if ! jar tf ./gradle/wrapper/gradle-wrapper.jar >/dev/null 2>&1; then
+            echo "⚠️ Corrupted gradle-wrapper.jar detected. Regenerating valid wrapper..."
+            if command -v gradle >/dev/null 2>&1; then
+              gradle wrapper --gradle-version 8.14.3
+            else
+              curl -fsSL -o ./gradle/wrapper/gradle-wrapper.jar "https://raw.githubusercontent.com/ionic-team/capacitor/main/android-template/gradle/wrapper/gradle-wrapper.jar"
+            fi
+          fi
+          chmod +x ./gradlew
 
       # ----------------- Debug Flow -----------------
       - name: 🔨 Build Debug APK
