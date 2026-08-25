@@ -12,9 +12,9 @@ export function getApiBaseUrl(): string {
     return envUrl.trim().replace(/\/$/, "");
   }
 
-  // Fallback: If on native Android and no custom URL configured, default to Cloud Run development endpoint or empty string
+  // If on native Android and no custom URL configured, route to the cloud backend server
   if (Capacitor.isNativePlatform()) {
-    return "";
+    return "https://ais-dev-lcyhq5hqe53iw7xy4xblqz-343361401430.europe-west2.run.app";
   }
 
   return "";

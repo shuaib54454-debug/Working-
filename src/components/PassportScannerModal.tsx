@@ -69,14 +69,16 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
   const [mrzLine1, setMrzLine1] = useState("");
   const [mrzLine2, setMrzLine2] = useState("");
 
-  // Visual Zone text inputs (for OCR/Manual verification)
+  // Extracted Candidate Fields (Two-way editable)
+  const [candidateFirstName, setCandidateFirstName] = useState("");
+  const [candidateLastName, setCandidateLastName] = useState("");
   const [visualName, setVisualName] = useState("");
   const [visualPassportNo, setVisualPassportNo] = useState("");
   const [visualBirthDate, setVisualBirthDate] = useState("");
   const [visualExpiryDate, setVisualExpiryDate] = useState("");
   const [visualGender, setVisualGender] = useState<"male" | "female">("male");
-  const [visualNationality, setVisualNationality] = useState("");
-  const [visualJob, setVisualJob] = useState("");
+  const [visualNationality, setVisualNationality] = useState("المملكة العربية السعودية");
+  const [visualJob, setVisualJob] = useState("عامل / عاملة");
 
   // Analysis result
   const [analysis, setAnalysis] = useState<PassportScanAnalysis | null>(null);
@@ -104,14 +106,40 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
 
   // Recalculate analysis when MRZ lines or visual fields change
   useEffect(() => {
-    if (!mrzLine1 && !mrzLine2 && !visualPassportNo) {
+    if (!mrzLine1 && !mrzLine2 && !visualPassportNo && !candidateFirstName) {
       setAnalysis(null);
       return;
     }
 
     const parsedMRZ = parseTD3MRZ(mrzLine1, mrzLine2);
+    
+    // Auto-fill candidate fields from parsed MRZ if not manually filled
+    if (parsedMRZ) {
+      if (!candidateFirstName && parsedMRZ.givenNames) {
+        setCandidateFirstName(parsedMRZ.givenNames);
+      }
+      if (!candidateLastName && parsedMRZ.surname && parsedMRZ.surname !== "المرشح") {
+        setCandidateLastName(parsedMRZ.surname);
+      }
+      if (!visualPassportNo && parsedMRZ.passportNumber) {
+        setVisualPassportNo(parsedMRZ.passportNumber);
+      }
+      if (!visualBirthDate && parsedMRZ.birthDateFormatted) {
+        setVisualBirthDate(parsedMRZ.birthDateFormatted);
+      }
+      if (!visualExpiryDate && parsedMRZ.expiryDateFormatted) {
+        setVisualExpiryDate(parsedMRZ.expiryDateFormatted);
+      }
+      if (parsedMRZ.gender === "female" || parsedMRZ.gender === "male") {
+        setVisualGender(parsedMRZ.gender);
+      }
+      if (parsedMRZ.nationalityName && visualNationality === "المملكة العربية السعودية") {
+        setVisualNationality(parsedMRZ.nationalityName);
+      }
+    }
+
     const visualData: VisualZoneData = {
-      fullName: visualName || undefined,
+      fullName: candidateFirstName && candidateLastName ? `${candidateFirstName} ${candidateLastName}` : visualName || undefined,
       passportNumber: visualPassportNo || undefined,
       birthDate: visualBirthDate || undefined,
       expiryDate: visualExpiryDate || undefined,
@@ -125,6 +153,8 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
   }, [
     mrzLine1,
     mrzLine2,
+    candidateFirstName,
+    candidateLastName,
     visualName,
     visualPassportNo,
     visualBirthDate,
@@ -213,8 +243,23 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
           if (l1) setMrzLine1(l1);
           if (l2) setMrzLine2(l2);
           if (visualZone) {
-            if (visualZone.fullName || visualZone.fullNameArabic) {
-              setVisualName(visualZone.fullNameArabic || visualZone.fullName || "");
+            if (visualZone.firstName) {
+              setCandidateFirstName(visualZone.firstName);
+            }
+            if (visualZone.lastName) {
+              setCandidateLastName(visualZone.lastName);
+            }
+            if (!visualZone.firstName && !visualZone.lastName && (visualZone.fullName || visualZone.fullNameArabic)) {
+              const fullName = visualZone.fullNameArabic || visualZone.fullName || "";
+              const parts = fullName.trim().split(/\s+/);
+              if (parts.length > 1) {
+                setCandidateFirstName(parts.slice(0, -1).join(" "));
+                setCandidateLastName(parts[parts.length - 1]);
+              } else {
+                setCandidateFirstName(fullName);
+                setCandidateLastName(fullName);
+              }
+              setVisualName(fullName);
             }
             if (visualZone.passportNumber) setVisualPassportNo(visualZone.passportNumber);
             if (visualZone.birthDate) setVisualBirthDate(visualZone.birthDate);
@@ -230,11 +275,9 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
         }
       }
     } catch (e) {
-      console.warn("AI Backend error, falling back to manual/sample mode:", e);
+      console.warn("AI Backend error, falling back to client-side parsing:", e);
     }
 
-    // Fallback: auto-populate sample if image scan wasn't connected to active Gemini key
-    // Inform user gently
     setIsProcessing(false);
   };
 
@@ -242,52 +285,63 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
   const loadSample = (sample: (typeof SAMPLE_PASSPORTS)[0]) => {
     setMrzLine1(sample.line1);
     setMrzLine2(sample.line2);
-    setVisualName(sample.visual.fullNameArabic || sample.visual.fullName);
+    const fullName = sample.visual.fullNameArabic || sample.visual.fullName;
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length > 1) {
+      setCandidateFirstName(parts.slice(0, -1).join(" "));
+      setCandidateLastName(parts[parts.length - 1]);
+    } else {
+      setCandidateFirstName(fullName);
+      setCandidateLastName(fullName);
+    }
+    setVisualName(fullName);
     setVisualPassportNo(sample.visual.passportNumber);
     setVisualBirthDate(sample.visual.birthDate);
     setVisualExpiryDate(sample.visual.expiryDate);
     setVisualGender(sample.visual.gender);
     setVisualNationality(sample.visual.nationality);
-    setVisualJob(sample.visual.jobTitle || "");
+    setVisualJob(sample.visual.jobTitle || "عامل / عاملة");
     setSelectedImage(null);
   };
 
   // Apply parsed and verified data to Candidate Form
   const handleApply = () => {
-    if (!analysis) return;
+    let fName = candidateFirstName.trim();
+    let lName = candidateLastName.trim();
 
-    let fName = "";
-    let lName = "";
-
-    if (visualName) {
+    if (!fName && visualName) {
       const parts = visualName.trim().split(/\s+/);
       if (parts.length > 1) {
         fName = parts.slice(0, -1).join(" ");
         lName = parts[parts.length - 1];
       } else {
         fName = visualName;
-        lName = "-";
+        lName = visualName;
       }
-    } else if (analysis.mrz) {
+    } else if (!fName && analysis?.mrz) {
       fName = analysis.mrz.givenNames || "المرشح";
-      lName = analysis.mrz.surname || "-";
+      lName = analysis.mrz.surname && analysis.mrz.surname !== "المرشح" ? analysis.mrz.surname : fName;
     }
 
-    const passNo = analysis.mrz?.passportNumber || visualPassportNo || "";
-    const passExp = analysis.mrz?.expiryDateFormatted || visualExpiryDate || "";
-    const bDate = analysis.mrz?.birthDateFormatted || visualBirthDate || "";
-    const gndr = analysis.mrz?.gender === "female" || visualGender === "female" ? "female" : "male";
-    const cntry = analysis.mrz?.issuingCountryName || visualNationality || "المملكة العربية السعودية";
+    if (!lName) {
+      lName = fName || "المرشح";
+    }
+
+    const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "P0000000";
+    const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "2030-01-01";
+    const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";
+    const gndr = visualGender || (analysis?.mrz?.gender === "female" ? "female" : "male");
+    const cntry = visualNationality || analysis?.mrz?.nationalityName || "المملكة العربية السعودية";
 
     onApplyData({
-      firstName: fName,
-      lastName: lName,
+      firstName: fName || "المرشح",
+      lastName: lName || "المرشح",
       passportNumber: passNo,
       passportExpiryDate: passExp,
       dateOfBirth: bDate,
       gender: gndr,
       country: cntry,
-      job: visualJob || undefined
+      job: visualJob || "عامل / عاملة"
     });
 
     onClose();
@@ -517,6 +571,106 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* Candidate Extracted Data Preview & Edit Panel */}
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-stone-200 shadow-xs space-y-3">
+            <div className="flex items-center justify-between border-b border-stone-100 pb-2">
+              <h4 className="font-black text-xs text-[#172a46] flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>بيانات المرشح المستخرجة من الجواز (تعبئة فورية ومراجعة):</span>
+              </h4>
+              <span className="text-[11px] font-bold text-stone-400">قابلة للتعديل والتحقق</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div>
+                <label className="text-stone-500 font-bold block mb-1">الاسم الأول (Given Name):</label>
+                <input
+                  type="text"
+                  value={candidateFirstName}
+                  onChange={(e) => setCandidateFirstName(e.target.value)}
+                  placeholder="الاسم الأول"
+                  className="w-full bg-stone-50 text-stone-900 px-3 py-2 rounded-xl border border-stone-200 font-bold focus:bg-white focus:border-[#172a46] focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="text-stone-500 font-bold block mb-1">اسم العائلة / اللقب (Surname):</label>
+                <input
+                  type="text"
+                  value={candidateLastName}
+                  onChange={(e) => setCandidateLastName(e.target.value)}
+                  placeholder="اسم العائلة"
+                  className="w-full bg-stone-50 text-stone-900 px-3 py-2 rounded-xl border border-stone-200 font-bold focus:bg-white focus:border-[#172a46] focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="text-stone-500 font-bold block mb-1">رقم الجواز (Passport No):</label>
+                <input
+                  type="text"
+                  value={visualPassportNo}
+                  onChange={(e) => setVisualPassportNo(e.target.value.toUpperCase())}
+                  placeholder="A12345678"
+                  className="w-full bg-stone-50 text-stone-900 px-3 py-2 rounded-xl border border-stone-200 font-bold font-mono focus:bg-white focus:border-[#172a46] focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="text-stone-500 font-bold block mb-1">الدولة / الجنسية:</label>
+                <input
+                  type="text"
+                  value={visualNationality}
+                  onChange={(e) => setVisualNationality(e.target.value)}
+                  placeholder="المملكة العربية السعودية"
+                  className="w-full bg-stone-50 text-stone-900 px-3 py-2 rounded-xl border border-stone-200 font-bold focus:bg-white focus:border-[#172a46] focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="text-stone-500 font-bold block mb-1">تاريخ الميلاد (DOB):</label>
+                <input
+                  type="date"
+                  value={visualBirthDate}
+                  onChange={(e) => setVisualBirthDate(e.target.value)}
+                  className="w-full bg-stone-50 text-stone-900 px-3 py-2 rounded-xl border border-stone-200 font-bold focus:bg-white focus:border-[#172a46] focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="text-stone-500 font-bold block mb-1">تاريخ انتهاء الجواز:</label>
+                <input
+                  type="date"
+                  value={visualExpiryDate}
+                  onChange={(e) => setVisualExpiryDate(e.target.value)}
+                  className="w-full bg-stone-50 text-stone-900 px-3 py-2 rounded-xl border border-stone-200 font-bold focus:bg-white focus:border-[#172a46] focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="text-stone-500 font-bold block mb-1">الجنس:</label>
+                <select
+                  value={visualGender}
+                  onChange={(e) => setVisualGender(e.target.value as "male" | "female")}
+                  className="w-full bg-stone-50 text-stone-900 px-3 py-2 rounded-xl border border-stone-200 font-bold focus:bg-white focus:border-[#172a46] focus:outline-hidden"
+                >
+                  <option value="male">ذكر (Male)</option>
+                  <option value="female">أنثى (Female)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-stone-500 font-bold block mb-1">المهنة المقترحة:</label>
+                <input
+                  type="text"
+                  value={visualJob}
+                  onChange={(e) => setVisualJob(e.target.value)}
+                  placeholder="عاملة منزلية / سائق"
+                  className="w-full bg-stone-50 text-stone-900 px-3 py-2 rounded-xl border border-stone-200 font-bold focus:bg-white focus:border-[#172a46] focus:outline-hidden"
+                />
+              </div>
+            </div>
+          </div>
 
           {/* MRZ Lines Box (Interactive & Editable) */}
           <div className="bg-[#172a46] text-white p-4 sm:p-5 rounded-2xl shadow-inner space-y-3">
@@ -845,7 +999,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
 
             <button
               onClick={handleApply}
-              disabled={!analysis}
+              disabled={!analysis && !candidateFirstName && !visualPassportNo && !mrzLine1}
               className="w-1/2 sm:w-auto bg-[#172a46] hover:bg-[#223d64] text-white px-6 py-2.5 rounded-2xl font-black text-xs shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 disabled:opacity-50"
             >
               <CheckCircle2 className="w-4 h-4 text-[#c9a84c]" />

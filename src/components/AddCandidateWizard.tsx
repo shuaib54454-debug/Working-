@@ -78,7 +78,11 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
     job?: string;
   }) => {
     if (data.firstName) setFirstName(data.firstName);
-    if (data.lastName && data.lastName !== "-") setLastName(data.lastName);
+    if (data.lastName) {
+      setLastName(data.lastName === "-" ? data.firstName : data.lastName);
+    } else if (data.firstName) {
+      setLastName(data.firstName);
+    }
     if (data.passportNumber) setPassportNumber(data.passportNumber);
     if (data.passportExpiryDate) setPassportExpiryDate(data.passportExpiryDate);
     if (data.dateOfBirth) setDateOfBirth(data.dateOfBirth);
