@@ -49,6 +49,54 @@ export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestore
 
 export const storage = getStorage(app);
 
+// Error handling conforming to Firebase skill
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  return errInfo;
+}
+
 // Authentication Helpers
 export async function loginWithEmail(email: string, pass: string): Promise<User> {
   const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
@@ -101,7 +149,7 @@ export function subscribeToCandidates(
   onError?: (err: Error) => void
 ): Unsubscribe {
   const colRef = collection(db, "candidates");
-  // Query only records belonging to the authenticated owner
+  // Query records for the authenticated owner
   const q = query(colRef, where("ownerUid", "==", ownerUid));
   
   return onSnapshot(
@@ -114,52 +162,54 @@ export function subscribeToCandidates(
       onUpdate(list);
     },
     (error) => {
-      console.warn("Firestore candidates sync listener error:", error.message);
+      handleFirestoreError(error, OperationType.LIST, "candidates");
       if (onError) onError(error);
     }
   );
 }
 
 export async function syncCandidateToCloud(candidate: Candidate, ownerUid?: string): Promise<void> {
+  const uid = ownerUid || auth.currentUser?.uid;
+  if (!uid) {
+    console.warn("Skipping candidate sync: User not authenticated");
+    return;
+  }
+  const path = `candidates/${candidate.id}`;
   try {
-    const uid = ownerUid || auth.currentUser?.uid;
-    if (!uid) {
-      console.warn("Skipping candidate sync: User not authenticated");
-      return;
-    }
     const docRef = doc(db, "candidates", candidate.id);
     const payload: Candidate = {
       ...candidate,
-      ownerUid: candidate.ownerUid || uid
+      ownerUid: uid
     };
     await setDoc(docRef, payload, { merge: true });
   } catch (e) {
-    console.error(`Failed to sync candidate ${candidate.id} to cloud:`, e);
+    handleFirestoreError(e, OperationType.WRITE, path);
   }
 }
 
 export async function deleteCandidateFromCloud(candidateId: string): Promise<void> {
+  const path = `candidates/${candidateId}`;
   try {
     if (!auth.currentUser) return;
     const docRef = doc(db, "candidates", candidateId);
     await deleteDoc(docRef);
   } catch (e) {
-    console.error(`Failed to delete candidate ${candidateId} from cloud:`, e);
+    handleFirestoreError(e, OperationType.DELETE, path);
   }
 }
 
 export async function syncAllCandidatesBatch(candidates: Candidate[], ownerUid?: string): Promise<void> {
   try {
     const uid = ownerUid || auth.currentUser?.uid;
-    if (!uid) return;
+    if (!uid || candidates.length === 0) return;
     const batch = writeBatch(db);
     candidates.forEach((cand) => {
       const docRef = doc(db, "candidates", cand.id);
-      batch.set(docRef, { ...cand, ownerUid: cand.ownerUid || uid }, { merge: true });
+      batch.set(docRef, { ...cand, ownerUid: uid }, { merge: true });
     });
     await batch.commit();
   } catch (e) {
-    console.error("Failed to batch save candidates:", e);
+    handleFirestoreError(e, OperationType.WRITE, "candidates/batch");
   }
 }
 
@@ -182,49 +232,51 @@ export function subscribeToExpenses(
       onUpdate(list);
     },
     (error) => {
-      console.warn("Firestore expenses sync listener error:", error.message);
+      handleFirestoreError(error, OperationType.LIST, "expenses");
       if (onError) onError(error);
     }
   );
 }
 
 export async function syncExpenseToCloud(expense: GeneralExpense, ownerUid?: string): Promise<void> {
+  const uid = ownerUid || auth.currentUser?.uid;
+  if (!uid) return;
+  const path = `expenses/${expense.id}`;
   try {
-    const uid = ownerUid || auth.currentUser?.uid;
-    if (!uid) return;
     const docRef = doc(db, "expenses", String(expense.id));
     const payload: GeneralExpense = {
       ...expense,
-      ownerUid: expense.ownerUid || uid
+      ownerUid: uid
     };
     await setDoc(docRef, payload, { merge: true });
   } catch (e) {
-    console.error(`Failed to sync expense ${expense.id} to cloud:`, e);
+    handleFirestoreError(e, OperationType.WRITE, path);
   }
 }
 
 export async function deleteExpenseFromCloud(expenseId: string | number): Promise<void> {
+  const path = `expenses/${expenseId}`;
   try {
     if (!auth.currentUser) return;
     const docRef = doc(db, "expenses", String(expenseId));
     await deleteDoc(docRef);
   } catch (e) {
-    console.error(`Failed to delete expense ${expenseId} from cloud:`, e);
+    handleFirestoreError(e, OperationType.DELETE, path);
   }
 }
 
 export async function syncAllExpensesBatch(expenses: GeneralExpense[], ownerUid?: string): Promise<void> {
   try {
     const uid = ownerUid || auth.currentUser?.uid;
-    if (!uid) return;
+    if (!uid || expenses.length === 0) return;
     const batch = writeBatch(db);
     expenses.forEach((exp) => {
       const docRef = doc(db, "expenses", String(exp.id));
-      batch.set(docRef, { ...exp, ownerUid: exp.ownerUid || uid }, { merge: true });
+      batch.set(docRef, { ...exp, ownerUid: uid }, { merge: true });
     });
     await batch.commit();
   } catch (e) {
-    console.error("Failed to batch save expenses:", e);
+    handleFirestoreError(e, OperationType.WRITE, "expenses/batch");
   }
 }
 
@@ -246,20 +298,21 @@ export function subscribeToSettings(
       }
     },
     (error) => {
-      console.warn("Firestore settings sync listener error:", error.message);
+      handleFirestoreError(error, OperationType.GET, `settings/${ownerUid}`);
       if (onError) onError(error);
     }
   );
 }
 
 export async function syncSettingsToCloud(settings: AgencySettings, ownerUid?: string): Promise<void> {
+  const uid = ownerUid || auth.currentUser?.uid;
+  if (!uid) return;
+  const path = `settings/${uid}`;
   try {
-    const uid = ownerUid || auth.currentUser?.uid;
-    if (!uid) return;
     const docRef = doc(db, "settings", uid);
     await setDoc(docRef, { ...settings, ownerUid: uid }, { merge: true });
   } catch (e) {
-    console.error("Failed to sync settings to cloud:", e);
+    handleFirestoreError(e, OperationType.WRITE, path);
   }
 }
 

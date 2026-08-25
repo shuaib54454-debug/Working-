@@ -16,93 +16,91 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
-    // Checks that the document is owned by the current authenticated user
+    // Bootstrapped Admin check
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "shuaib54454@gmail.com" ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Checks that the document is owned by the current authenticated user or is unassigned/admin
     function isDocOwner() {
-      return isSignedIn() 
-        && resource != null 
-        && 'ownerUid' in resource.data 
-        && resource.data.ownerUid == request.auth.uid;
+      return isSignedIn() && (
+        isAdmin() ||
+        (resource != null && (
+          !('ownerUid' in resource.data) || 
+          resource.data.ownerUid == null || 
+          resource.data.ownerUid == '' || 
+          resource.data.ownerUid == request.auth.uid
+        ))
+      );
     }
 
-    // Checks that the created document has a valid ownerUid matching the user's UID
+    // Checks that the created document has a valid ownerUid matching the user's UID or admin
     function isCreatingWithOwner() {
-      return isSignedIn() 
-        && 'ownerUid' in request.resource.data 
-        && request.resource.data.ownerUid is string
-        && request.resource.data.ownerUid == request.auth.uid;
+      return isSignedIn() && (
+        isAdmin() ||
+        (
+          'ownerUid' in request.resource.data &&
+          request.resource.data.ownerUid is string &&
+          (request.resource.data.ownerUid == request.auth.uid || request.resource.data.ownerUid == '')
+        )
+      );
     }
 
-    // Ensures the user is the owner AND that ownerUid cannot be changed / is immutable
+    // Ensures the user is the owner AND that ownerUid can be adopted or maintained
     function isUpdatingWithOwner() {
-      return isDocOwner() 
-        && 'ownerUid' in request.resource.data
-        && request.resource.data.ownerUid == resource.data.ownerUid;
+      return isSignedIn() && (
+        isAdmin() ||
+        isDocOwner() ||
+        (
+          'ownerUid' in request.resource.data &&
+          request.resource.data.ownerUid == request.auth.uid
+        )
+      );
     }
 
     // 1. Candidates Collection
     match /candidates/{candidateId} {
-      // Allow read (get & list) ONLY to the owner
-      allow get, list: if isDocOwner();
-
-      // Require ownerUid to exist and match request.auth.uid on creation
+      allow get, list: if isSignedIn() && (isDocOwner() || isAdmin());
       allow create: if isCreatingWithOwner() && isValidId(candidateId);
-
-      // Require document owner match AND enforce that ownerUid is immutable
       allow update: if isUpdatingWithOwner() && isValidId(candidateId);
-
-      // Allow delete only to the document owner
-      allow delete: if isDocOwner() && isValidId(candidateId);
+      allow delete: if (isDocOwner() || isAdmin()) && isValidId(candidateId);
     }
 
     // 2. Operating Expenses Collection
     match /expenses/{expenseId} {
-      // Allow read (get & list) ONLY to the owner
-      allow get, list: if isDocOwner();
-
-      // Require ownerUid to exist and match request.auth.uid on creation
+      allow get, list: if isSignedIn() && (isDocOwner() || isAdmin());
       allow create: if isCreatingWithOwner() && isValidId(expenseId);
-
-      // Require document owner match AND enforce that ownerUid is immutable
       allow update: if isUpdatingWithOwner() && isValidId(expenseId);
-
-      // Allow delete only to the document owner
-      allow delete: if isDocOwner() && isValidId(expenseId);
+      allow delete: if (isDocOwner() || isAdmin()) && isValidId(expenseId);
     }
 
     // 3. Agency Settings Collection
     match /settings/{settingId} {
-      // Allow read if user owns the document or document ID matches their UID
       allow get, list: if isSignedIn() && (
-        (resource != null && 'ownerUid' in resource.data && resource.data.ownerUid == request.auth.uid) ||
+        isDocOwner() ||
+        isAdmin() ||
         settingId == request.auth.uid ||
         settingId == 'agency_config'
       );
-
-      // Require ownerUid to exist and match request.auth.uid on creation, or settingId matches UID
-      allow create: if isSignedIn() && isValidId(settingId) && (
-        isCreatingWithOwner() ||
-        settingId == request.auth.uid ||
-        (request.resource.data.ownerUid == request.auth.uid)
-      );
-
-      // Allow update if document is owned by user or settingId matches user's UID
-      allow update: if isSignedIn() && isValidId(settingId) && (
-        isUpdatingWithOwner() ||
-        settingId == request.auth.uid ||
-        (resource != null && resource.data.ownerUid == request.auth.uid)
-      );
-
-      // Allow delete only to the document owner
-      allow delete: if isSignedIn() && isValidId(settingId) && (
-        isDocOwner() ||
-        settingId == request.auth.uid
-      );
+      allow create: if isSignedIn() && isValidId(settingId);
+      allow update: if isSignedIn() && isValidId(settingId);
+      allow delete: if isSignedIn() && isValidId(settingId) && (isDocOwner() || isAdmin());
     }
 
-    // System Health Check
+    // 4. Admins Collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 5. System Health Check
     match /_system/{docId} {
       allow read, write: if isSignedIn();
     }
   }
 }
+
 
