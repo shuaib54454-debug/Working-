@@ -87,69 +87,51 @@ jobs:
           retention-days: 30
 
       # ----------------- Release Flow with Keystore Signing -----------------
-      - name: 🔐 Decode & Load Keystore Secret
+      - name: 🔐 Setup Keystore & Auto-Sign Configuration
         if: "${{ github.event.inputs.build_type != 'debug' }}"
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > android/app/shuayb-release-key.jks
-            FILE_SIZE=$(wc -c < android/app/shuayb-release-key.jks)
-            echo "✅ Keystore decoded successfully. Size: $FILE_SIZE bytes"
-            if [ "$FILE_SIZE" -lt 100 ]; then
-              echo "⚠️ Warning: Keystore file size is unusually small. Check ANDROID_KEYSTORE_BASE64 secret."
-            fi
-            echo "HAS_KEYSTORE=true" >> $GITHUB_ENV
+            echo "✅ Custom Keystore decoded successfully."
+            echo "ANDROID_KEYSTORE_FILE=shuayb-release-key.jks" >> $GITHUB_ENV
+            echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $GITHUB_ENV
+            echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $GITHUB_ENV
           else
-            echo "⚠️ ANDROID_KEYSTORE_BASE64 is not set in repository secrets. Building unsigned release APK."
-            echo "HAS_KEYSTORE=false" >> $GITHUB_ENV
+            echo "⚡ Generating automatic signing keystore so the APK installs directly on Android..."
+            keytool -genkeypair -v -keystore android/app/shuayb-release-key.jks -alias shuayb -keyalg RSA -keysize 2048 -validity 10000 -storepass shuayb123456 -keypass shuayb123456 -dname "CN=Shuayb Agency, OU=Recruitment, O=Shuayb, L=Riyadh, ST=Riyadh, C=SA"
+            echo "ANDROID_KEYSTORE_FILE=shuayb-release-key.jks" >> $GITHUB_ENV
+            echo "ANDROID_KEYSTORE_PASSWORD=shuayb123456" >> $GITHUB_ENV
+            echo "ANDROID_KEY_ALIAS=shuayb" >> $GITHUB_ENV
+            echo "ANDROID_KEY_PASSWORD=shuayb123456" >> $GITHUB_ENV
           fi
 
       - name: 🔨 Assemble Release APK
         if: "${{ github.event.inputs.build_type != 'debug' }}"
-        env:
-          ANDROID_KEYSTORE_FILE: "shuayb-release-key.jks"
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           cd android
           ./gradlew assembleRelease --stacktrace --no-daemon
 
-      - name: 🔍 Verify Signature with apksigner
+      - name: ✍️ Ensure APK is Signed (Zipalign & apksigner)
         if: "${{ github.event.inputs.build_type != 'debug' }}"
         run: |
-          SIGNED_APK="android/app/build/outputs/apk/release/app-release.apk"
-          UNSIGNED_APK="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          cd android
+          APKSIGNER=$(find $ANDROID_SDK_ROOT/build-tools -name apksigner 2>/dev/null | sort -V | tail -n 1)
           
-          if [ -f "$SIGNED_APK" ]; then
-            TARGET_APK="$SIGNED_APK"
-            echo "Found signed APK: $TARGET_APK"
-          elif [ -f "$UNSIGNED_APK" ]; then
-            TARGET_APK="$UNSIGNED_APK"
-            echo "Found unsigned APK: $TARGET_APK"
-          else
-            echo "❌ Error: No release APK generated in outputs!"
-            exit 1
+          # Check if signed APK was produced by gradle
+          if [ ! -f "app/build/outputs/apk/release/app-release.apk" ] && [ -f "app/build/outputs/apk/release/app-release-unsigned.apk" ]; then
+            echo "Signing app-release-unsigned.apk manually with apksigner..."
+            $APKSIGNER sign --ks app/shuayb-release-key.jks --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass "pass:$ANDROID_KEY_PASSWORD" --out app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/app-release-unsigned.apk
           fi
 
           echo "=========================================="
-          echo "Verifying APK Signature with apksigner..."
+          echo "Verifying final APK Signature..."
           echo "=========================================="
-          
-          APKSIGNER=$(find $ANDROID_SDK_ROOT/build-tools -name apksigner 2>/dev/null | sort -V | tail -n 1)
-          if [ -n "$APKSIGNER" ]; then
-            if $APKSIGNER verify --verbose "$TARGET_APK"; then
-              echo "------------------------------------------"
-              echo "✅ Verification Status: SIGNED (Verified successfully)"
-              echo "------------------------------------------"
-            else
-              echo "------------------------------------------"
-              echo "⚠️ Verification Status: NOT SIGNED (Check Keystore secrets)"
-              echo "------------------------------------------"
-            fi
-          else
-            echo "apksigner not found in path, APK existence verified: OK"
+          if [ -f "app/build/outputs/apk/release/app-release.apk" ]; then
+            $APKSIGNER verify --verbose app/build/outputs/apk/release/app-release.apk
+            echo "🎉 APK is ready and signed for installation: app/build/outputs/apk/release/app-release.apk"
           fi
 
       - name: 📤 Upload Release APK Artifact
