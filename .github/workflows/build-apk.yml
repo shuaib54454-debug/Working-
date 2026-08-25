@@ -51,7 +51,7 @@ jobs:
           node scripts/generate-android-assets.cjs
 
       - name: ☕ Setup Java 21 (Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'

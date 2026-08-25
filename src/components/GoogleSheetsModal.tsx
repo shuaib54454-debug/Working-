@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   FileSpreadsheet,
   X,
@@ -14,7 +14,11 @@ import {
   Sparkles,
   Database,
   ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  Copy,
+  Check,
+  FileText,
+  FileDown
 } from "lucide-react";
 import { Candidate, GeneralExpense, AgencySettings } from "../types";
 import {
@@ -31,6 +35,11 @@ import {
   GoogleDriveFile,
   ImportedCandidatePreview
 } from "../lib/googleSheets";
+import {
+  exportCandidatesToCSV,
+  exportFinanceToCSV,
+  exportFullJSONBackup
+} from "../lib/exportUtils";
 
 interface GoogleSheetsModalProps {
   isOpen: boolean;
@@ -59,9 +68,11 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
   const [authLoading, setAuthLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState(false);
+  const [copiedDomain, setCopiedDomain] = useState(false);
 
   // Sheets state
-  const [activeTab, setActiveTab] = useState<"sync" | "create" | "existing" | "import">("sync");
+  const [activeTab, setActiveTab] = useState<"sync" | "create" | "existing" | "import" | "direct">("sync");
   const [driveFiles, setDriveFiles] = useState<GoogleDriveFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [selectedSpreadsheetId, setSelectedSpreadsheetId] = useState<string>(() => {
@@ -79,6 +90,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
   // Import preview state
   const [importPreviews, setImportPreviews] = useState<ImportedCandidatePreview[]>([]);
   const [loadingImport, setLoadingImport] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Destructive confirmation dialog state
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -88,6 +100,9 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     actionType: "overwrite_sheet" | "import_data";
     onConfirm: () => void;
   } | null>(null);
+
+  // Current domain hostname
+  const currentHostname = typeof window !== "undefined" ? window.location.hostname : "";
 
   // Listen to auth
   useEffect(() => {
@@ -139,6 +154,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     try {
       setAuthLoading(true);
       setErrorMsg(null);
+      setIsUnauthorizedDomain(false);
       const res = await googleSignIn();
       if (res) {
         setIsSignedIn(true);
@@ -152,9 +168,22 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
       }
     } catch (err: any) {
       console.error("Login failed:", err);
-      setErrorMsg(err.message || "فشل تسجيل الدخول بحساب Google. يرجى المحاولة مرة أخرى.");
+      if (err.code === "auth/unauthorized-domain" || err.message?.includes("auth/unauthorized-domain") || err.message?.includes("غير مدرج ضمن النطاقات المصرح بها")) {
+        setIsUnauthorizedDomain(true);
+        setErrorMsg(`النطاق الحالي (${currentHostname}) يتطلب إضافته إلى النطاقات المصرح بها في إعدادات Firebase Console، أو يمكنك استخدام التصدير/الاستيراد الفوري عبر ملفات Excel و CSV.`);
+      } else {
+        setErrorMsg(err.message || "فشل تسجيل الدخول بحساب Google. يرجى المحاولة مرة أخرى.");
+      }
     } finally {
       setAuthLoading(false);
+    }
+  };
+
+  const handleCopyDomain = () => {
+    if (currentHostname) {
+      navigator.clipboard.writeText(currentHostname);
+      setCopiedDomain(true);
+      setTimeout(() => setCopiedDomain(false), 3000);
     }
   };
 
@@ -182,7 +211,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
         return;
       }
 
-      const { spreadsheetId, spreadsheetUrl } = await createAgencySpreadsheet(
+      const { spreadsheetId } = await createAgencySpreadsheet(
         token,
         newSheetTitle,
         candidates,
@@ -290,7 +319,72 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     }
   };
 
-  // 4. Confirm import into local database
+  // 4. Offline CSV file upload parser for candidates import
+  const handleCSVFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        if (!text) return;
+
+        // Parse CSV lines
+        const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+        if (lines.length <= 1) {
+          setErrorMsg("الملف فارغ أو لا يحتوي على صفوف بيانات صالحة.");
+          return;
+        }
+
+        const parsedList: ImportedCandidatePreview[] = [];
+        // Skip header row
+        for (let i = 1; i < lines.length; i++) {
+          const row = lines[i];
+          // Handle quoted cells
+          const regex = /(?:,|\n|^)("(?:(?:"")*[^"]*)*"|[^",\n]*|(?:\n|$))/g;
+          const matches = [];
+          let match;
+          while ((match = regex.exec(row)) !== null) {
+            let val = match[1] || "";
+            if (val.startsWith('"') && val.endsWith('"')) {
+              val = val.slice(1, -1).replace(/""/g, '"');
+            }
+            matches.push(val.trim());
+            if (match.index === regex.lastIndex) regex.lastIndex++;
+          }
+
+          if (matches.length >= 2 && matches[1]) {
+            const fName = matches[1] || "مرشح";
+            const lName = matches[2] || fName;
+            parsedList.push({
+              firstName: fName,
+              lastName: lName,
+              phone: matches[5] || "",
+              job: matches[6] || "عاملة منزلية",
+              country: matches[7] || "المملكة العربية السعودية",
+              passportNumber: matches[9] || "",
+              totalFees: parseFloat(matches[12]) || 15000,
+              stage: "CONTRACT"
+            });
+          }
+        }
+
+        if (parsedList.length > 0) {
+          setImportPreviews(parsedList);
+          setActiveTab("import");
+          setSuccessMsg(`تم استخراج ${parsedList.length} مرشح بنجاح من الملف! اضغط تأكيد الاستيراد لإضافتهم.`);
+        } else {
+          setErrorMsg("لم يتم التعرف على أي سجلات صالحة في ملف CSV.");
+        }
+      } catch (err: any) {
+        setErrorMsg("حدث خطأ أثناء معالجة ملف CSV: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // 5. Confirm import into local database
   const requestImportCandidates = () => {
     if (importPreviews.length === 0) return;
 
@@ -324,13 +418,13 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
             </div>
             <div>
               <h3 className="font-black text-base sm:text-lg flex items-center gap-2">
-                <span>تكامل Google Sheets المباشر</span>
+                <span>تكامل Google Sheets والتصدير المباشر</span>
                 <span className="text-[10px] font-black bg-[#c9a84c] text-[#172a46] px-2 py-0.5 rounded-full">
-                  سحابي
+                  سحابي ومحلي
                 </span>
               </h3>
               <p className="text-xs text-stone-300">
-                مزامنة وتصدير واستيراد بيانات المرشحين والمقبوضات والمصروفات مع جداول بيانات Google Drive
+                مزامنة وتصدير واستيراد بيانات المرشحين والمقبوضات والمصروفات مع جداول بيانات Google Drive وملفات Excel
               </p>
             </div>
           </div>
@@ -344,9 +438,9 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
 
         {/* Status Messages */}
         {errorMsg && (
-          <div className="bg-rose-50 border-b border-rose-200 p-3 px-6 flex items-center gap-2 text-xs font-bold text-rose-700">
-            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
-            <span>{errorMsg}</span>
+          <div className="bg-rose-50 border-b border-rose-200 p-3 px-6 flex items-start gap-2 text-xs font-bold text-rose-700">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+            <span className="leading-relaxed">{errorMsg}</span>
           </div>
         )}
         {successMsg && (
@@ -357,6 +451,56 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
         )}
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+          {/* Unauthorized Domain Helper Card */}
+          {isUnauthorizedDomain && (
+            <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 space-y-3 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-amber-900 font-black text-xs">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>خطوة سريعة: إضافة نطاق التطبيق إلى Firebase Authorized Domains</span>
+                </div>
+                <button
+                  onClick={() => setIsUnauthorizedDomain(false)}
+                  className="text-stone-400 hover:text-stone-700 text-xs font-bold"
+                >
+                  ✕ إخفاء
+                </button>
+              </div>
+              <p className="text-xs text-amber-800 leading-relaxed">
+                لكي يسمح Google بتسجيل الدخول السحابي المباشر عبر هذا الرابط، يرجى نسخ اسم النطاق أدناه وإضافته في إعدادات Firebase Console:
+              </p>
+              
+              <div className="flex items-center gap-2 bg-white p-2.5 rounded-xl border border-amber-200">
+                <code className="text-xs font-mono font-bold text-stone-800 flex-1 select-all break-all">
+                  {currentHostname}
+                </code>
+                <button
+                  onClick={handleCopyDomain}
+                  className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-black flex items-center gap-1 shrink-0 shadow-xs active:scale-95 transition-all"
+                >
+                  {copiedDomain ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedDomain ? "تم النسخ بنجاح!" : "نسخ النطاق"}</span>
+                </button>
+              </div>
+
+              <div className="text-[11px] text-amber-800 space-y-1 bg-amber-100/50 p-2.5 rounded-xl font-bold">
+                <div>1. افتح <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" className="underline text-amber-900">Firebase Console</a> ثم اختر مشروعك.</div>
+                <div>2. ادخل على <b>Authentication</b> ➔ تبويب <b>Settings</b> ➔ قسم <b>Authorized domains</b>.</div>
+                <div>3. اضغط <b>Add domain</b> والصق النطاق المنسوخ أعلاه <code>{currentHostname}</code> ثم اضغط حفظ.</div>
+              </div>
+
+              <div className="pt-2 border-t border-amber-200 flex items-center justify-between">
+                <span className="text-xs text-amber-900 font-bold">أو يمكنك استخدام التصدير والاستيراد الفوري عبر ملفات Excel الآن:</span>
+                <button
+                  onClick={() => setActiveTab("direct")}
+                  className="px-3.5 py-1.5 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-xl font-black text-xs shadow-xs"
+                >
+                  ⚡ تصدير Excel فوري بدون تسجيل
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Account & Connection Bar */}
           <div className="bg-white p-4 sm:p-5 rounded-2xl border border-stone-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -383,14 +527,14 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                     </span>
                   ) : (
                     <span className="text-[10px] font-bold text-stone-500 bg-stone-100 px-2 py-0.5 rounded-full">
-                      يتطلب تسجيل الدخول
+                      سحابي اختياري
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-stone-500 mt-0.5">
                   {isSignedIn
                     ? userProfile?.email || "تم منح أذونات Google Sheets & Drive بنجاح"
-                    : "قم بتسجيل الدخول للوصول إلى جداول البيانات في Google Drive"}
+                    : "قم بتسجيل الدخول للربط التلقائي أو استخدم التصدير الفوري بالأسفل"}
                 </p>
               </div>
             </div>
@@ -436,10 +580,10 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
           </div>
 
           {/* Navigation Tabs inside Modal */}
-          <div className="flex border-b border-stone-200 gap-1 sm:gap-2">
+          <div className="flex border-b border-stone-200 gap-1 sm:gap-2 overflow-x-auto pb-1">
             <button
               onClick={() => setActiveTab("sync")}
-              className={`pb-3 px-3 text-xs sm:text-sm font-black border-b-2 transition-colors flex items-center gap-1.5 ${
+              className={`pb-2.5 px-3 text-xs sm:text-sm font-black border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
                 activeTab === "sync"
                   ? "border-[#172a46] text-[#172a46]"
                   : "border-transparent text-stone-500 hover:text-stone-800"
@@ -451,7 +595,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
 
             <button
               onClick={() => setActiveTab("create")}
-              className={`pb-3 px-3 text-xs sm:text-sm font-black border-b-2 transition-colors flex items-center gap-1.5 ${
+              className={`pb-2.5 px-3 text-xs sm:text-sm font-black border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
                 activeTab === "create"
                   ? "border-[#172a46] text-[#172a46]"
                   : "border-transparent text-stone-500 hover:text-stone-800"
@@ -463,7 +607,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
 
             <button
               onClick={() => setActiveTab("existing")}
-              className={`pb-3 px-3 text-xs sm:text-sm font-black border-b-2 transition-colors flex items-center gap-1.5 ${
+              className={`pb-2.5 px-3 text-xs sm:text-sm font-black border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
                 activeTab === "existing"
                   ? "border-[#172a46] text-[#172a46]"
                   : "border-transparent text-stone-500 hover:text-stone-800"
@@ -475,7 +619,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
 
             <button
               onClick={() => setActiveTab("import")}
-              className={`pb-3 px-3 text-xs sm:text-sm font-black border-b-2 transition-colors flex items-center gap-1.5 ${
+              className={`pb-2.5 px-3 text-xs sm:text-sm font-black border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
                 activeTab === "import"
                   ? "border-[#172a46] text-[#172a46]"
                   : "border-transparent text-stone-500 hover:text-stone-800"
@@ -483,6 +627,18 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
             >
               <Download className="w-4 h-4" />
               استيراد مرشحين
+            </button>
+
+            <button
+              onClick={() => setActiveTab("direct")}
+              className={`pb-2.5 px-3 text-xs sm:text-sm font-black border-b-2 whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                activeTab === "direct"
+                  ? "border-[#c9a84c] text-[#172a46] bg-amber-50/60 rounded-t-xl"
+                  : "border-transparent text-[#c9a84c] hover:text-[#9e7d2b]"
+              }`}
+            >
+              <FileDown className="w-4 h-4 text-[#c9a84c]" />
+              ⚡ تصدير/استيراد Excel فوري
             </button>
           </div>
 
@@ -567,9 +723,9 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                   </div>
                   <h4 className="font-black text-sm text-[#172a46]">لا يوجد جدول Google Sheets مرتبط حالياً</h4>
                   <p className="text-xs text-stone-500 max-w-md mx-auto">
-                    يمكنك إنشاء جدول بيانات جديد بضغطة زر واحدة في حسابك على Google Drive، أو اختيار جدول موجود مسبقاً.
+                    يمكنك إنشاء جدول بيانات جديد بضغطة زر واحدة في حسابك على Google Drive، أو اختيار جدول موجود مسبقاً، أو استخدام التصدير الفوري المباشر.
                   </p>
-                  <div className="flex justify-center gap-3 pt-2">
+                  <div className="flex flex-wrap justify-center gap-3 pt-2">
                     <button
                       onClick={() => setActiveTab("create")}
                       className="px-4 py-2 bg-[#172a46] text-white hover:bg-[#243e65] rounded-2xl text-xs font-black flex items-center gap-1.5 shadow-xs"
@@ -583,6 +739,13 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                     >
                       <FolderOpen className="w-4 h-4" />
                       اختيار من Drive
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("direct")}
+                      className="px-4 py-2 bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 rounded-2xl text-xs font-black flex items-center gap-1.5"
+                    >
+                      <FileDown className="w-4 h-4 text-[#c9a84c]" />
+                      تصدير Excel فوري ⚡
                     </button>
                   </div>
                 </div>
@@ -613,7 +776,7 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
 
               <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200 text-xs space-y-1 text-stone-600">
                 <span className="font-bold text-[#172a46] block mb-1">الصفحات التي سيتم إنشاؤها تلقائياً:</span>
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
                   <div>✓ <strong>المرشحين:</strong> الاسم، الهاتف، المهنة، الدولة، الجواز، الرسوم، المتبقي.</div>
                   <div>✓ <strong>المدفوعات والسندات:</strong> أرقام السندات، التواريخ، المبالغ، طرق الدفع.</div>
                   <div>✓ <strong>المصروفات العامة:</strong> إيجارات، رواتب، تراخيص، مرافق.</div>
@@ -736,9 +899,15 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
                 </div>
 
                 {!selectedSpreadsheetId && (
-                  <p className="text-xs text-amber-700 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
-                    يرجى اختيار أو إنشاء جدول أولاً من تبويب "المزامنة" أو "اختيار من Drive".
-                  </p>
+                  <div className="flex items-center justify-between bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs text-amber-800">
+                    <span>يمكنك اختيار جدول متصل أو رفع ملف CSV مباشرة:</span>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs"
+                    >
+                      رفع ملف CSV محلياً
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -794,13 +963,121 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
               )}
             </div>
           )}
+
+          {/* TAB 5: Direct Offline Excel/CSV Export & Import */}
+          {activeTab === "direct" && (
+            <div className="space-y-4 animate-in fade-in">
+              <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs space-y-4">
+                <div>
+                  <h4 className="font-black text-sm text-[#172a46] flex items-center gap-2">
+                    <FileDown className="w-5 h-5 text-[#c9a84c]" />
+                    <span>تصدير واستيراد فوري بدون أي مصادقة أو تسجيل دخول</span>
+                  </h4>
+                  <p className="text-xs text-stone-500 mt-1">
+                    يعمل 100% دون الحاجة إلى الاتصال بحساب Google أو ضبط نطاقات Firebase. يتم تنزيل ملفات CSV متوافقة تماماً مع Microsoft Excel و Google Sheets مع دعم كامل للغة العربية.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Export Candidates CSV */}
+                  <div className="p-4 rounded-2xl border border-stone-200 bg-stone-50 space-y-3 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 font-black text-xs text-[#172a46]">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                        <span>سجل المرشحين التفصيلي (CSV/Excel)</span>
+                      </div>
+                      <p className="text-[11px] text-stone-500 mt-1">
+                        يحتوي على كافة بيانات المرشحين ({candidates.length} مرشح) مع أرقام الجوازات، التواريخ، الرسوم، والمتبقيات.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        exportCandidatesToCSV(candidates, settings);
+                        setSuccessMsg("تم تنزيل ملف Excel لسجل المرشحين بنجاح!");
+                        setTimeout(() => setSuccessMsg(null), 3000);
+                      }}
+                      className="w-full py-2 bg-[#172a46] hover:bg-[#243e65] text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
+                    >
+                      <Download className="w-4 h-4 text-[#c9a84c]" />
+                      <span>تنزيل جدول المرشحين (Excel)</span>
+                    </button>
+                  </div>
+
+                  {/* Export Financials CSV */}
+                  <div className="p-4 rounded-2xl border border-stone-200 bg-stone-50 space-y-3 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 font-black text-xs text-[#172a46]">
+                        <Database className="w-4 h-4 text-amber-600" />
+                        <span>سجل المدفوعات والمصروفات المالية</span>
+                      </div>
+                      <p className="text-[11px] text-stone-500 mt-1">
+                        تصدير كافة سندات القبض، المصروفات العامة، والموازنة المالية للوكالة.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        exportFinanceToCSV(candidates, generalExpenses, settings);
+                        setSuccessMsg("تم تنزيل جدول السجلات المالية بنجاح!");
+                        setTimeout(() => setSuccessMsg(null), 3000);
+                      }}
+                      className="w-full py-2 bg-[#172a46] hover:bg-[#243e65] text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
+                    >
+                      <Download className="w-4 h-4 text-[#c9a84c]" />
+                      <span>تنزيل جدول المالية (Excel)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Import from local CSV */}
+                <div className="p-4 rounded-2xl border-2 border-dashed border-stone-200 hover:border-[#172a46] transition-colors bg-white text-center space-y-2">
+                  <Upload className="w-6 h-6 text-stone-400 mx-auto" />
+                  <div className="text-xs font-bold text-stone-800">
+                    استيراد مرشحين من ملف CSV / Excel محلي
+                  </div>
+                  <p className="text-[11px] text-stone-400">
+                    اختر ملف CSV يحتوي على أعمدة (الاسم، الهاتف، المهنة، الدولة، الرسوم) وسيتم إدراجهم فوراً
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,.txt"
+                    onChange={handleCSVFileUpload}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-black inline-flex items-center gap-1.5 shadow-xs"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-[#172a46]" />
+                    <span>اختيار ملف من جهازك</span>
+                  </button>
+                </div>
+
+                {/* Full System Backup */}
+                <div className="flex items-center justify-between pt-2 border-t border-stone-100">
+                  <span className="text-xs text-stone-500 font-bold">نسخة احتياطية شاملة بصيغة JSON:</span>
+                  <button
+                    onClick={() => {
+                      exportFullJSONBackup(candidates, generalExpenses, settings);
+                      setSuccessMsg("تم تنزيل النسخة الاحتياطية الشاملة بنجاح!");
+                      setTimeout(() => setSuccessMsg(null), 3000);
+                    }}
+                    className="px-3.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold flex items-center gap-1"
+                  >
+                    <Database className="w-3.5 h-3.5 text-stone-600" />
+                    <span>تنزيل نسخة احتياطية (JSON)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Modal Footer */}
         <div className="bg-stone-50 p-4 border-t border-stone-200 flex items-center justify-between text-xs text-stone-500">
           <div className="flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            <span>اتصال آمن ومصرح به عبر Google Workspace OAuth2</span>
+            <span>اتصال آمن ومصرح به عبر Google Workspace OAuth2 و UTF-8 Excel</span>
           </div>
           <button
             onClick={onClose}
@@ -846,3 +1123,4 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
     </div>
   );
 };
+

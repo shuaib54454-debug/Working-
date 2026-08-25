@@ -81,6 +81,24 @@ export const googleSignIn = async (): Promise<{
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error("Google Sign-in error:", error);
+    if (error?.code === "auth/unauthorized-domain" || error?.message?.includes("auth/unauthorized-domain")) {
+      const currentHost = typeof window !== "undefined" ? window.location.hostname : "";
+      const customErr: any = new Error(
+        `النطاق الحالي (${currentHost || "هذا النطاق"}) غير مدرج ضمن النطاقات المصرح بها في إعدادات Firebase Console.`
+      );
+      customErr.code = "auth/unauthorized-domain";
+      customErr.domain = currentHost;
+      throw customErr;
+    }
+    if (error?.code === "auth/popup-closed-by-user") {
+      throw new Error("تم إغلاق نافذة تسجيل الدخول من قِبل المستخدم قبل إتمام العملية.");
+    }
+    if (error?.code === "auth/popup-blocked") {
+      throw new Error("قام المتصفح بحظر النافذة المنبثقة لتسجيل الدخول. يرجى السماح بالنوافذ المنبثقة.");
+    }
+    if (error?.code === "auth/network-request-failed") {
+      throw new Error("تعذر الاتصال بالخادم. يرجى التحقق من اتصال الإنترنت والمحاولة مجدداً.");
+    }
     throw error;
   } finally {
     isSigningIn = false;
