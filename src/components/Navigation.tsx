@@ -208,6 +208,18 @@ export const TopBar: React.FC<
             </button>
           )}
 
+          {/* Export & PDF Reports Trigger (Desktop) */}
+          {onOpenExportModal && (
+            <button
+              onClick={onOpenExportModal}
+              title={isAr ? "تصدير وطباعة تقارير PDF و Excel" : "Export PDF & Excel Reports"}
+              className="hidden md:flex items-center gap-1.5 px-3 py-2 bg-[#c9a84c]/20 hover:bg-[#c9a84c]/30 text-[#c9a84c] border border-[#c9a84c]/40 rounded-2xl text-xs font-black transition-all active:scale-95"
+            >
+              <Download className="w-4 h-4" />
+              <span>{isAr ? "تقارير PDF" : "PDF Reports"}</span>
+            </button>
+          )}
+
           {/* Alerts Notification Bell */}
           {alertCount > 0 && (
             <button
