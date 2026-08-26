@@ -14,23 +14,19 @@ import {
   Check,
   Calendar,
   User,
-  ArrowRight,
-  HelpCircle,
   Eye,
   SlidersHorizontal,
-  ChevronDown
+  Info
 } from "lucide-react";
 import {
   parseTD3MRZ,
   analyzeAndCrossCheckPassport,
   PassportScanAnalysis,
   SAMPLE_PASSPORTS,
-  MRZParsedData,
-  VisualZoneData,
-  sanitizeMRZLine
+  VisualZoneData
 } from "../lib/mrzScanner";
-import { getApiUrl } from "../lib/apiConfig";
-import { auth } from "../lib/firebase";
+import { postJsonToApi } from "../lib/apiConfig";
+import { compressImage } from "../lib/imageUtils";
 
 interface PassportScannerModalProps {
   isOpen: boolean;
@@ -63,6 +59,8 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
   // Manual & Image state
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
 
   // MRZ text inputs
@@ -186,7 +184,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
   };
 
   // Capture snapshot from camera
-  const captureSnapshot = () => {
+  const captureSnapshot = async () => {
     if (!videoRef.current) return;
     const canvas = document.createElement("canvas");
     canvas.width = videoRef.current.videoWidth || 1280;
@@ -194,91 +192,122 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-    setSelectedImage(dataUrl);
+    const rawDataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    setSelectedImage(rawDataUrl);
     stopCamera();
-    processImageWithAI(dataUrl);
+    await processImageWithAI(rawDataUrl);
   };
 
   // Handle file upload
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      setSelectedImage(dataUrl);
-      processImageWithAI(dataUrl);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // Process image with Gemini Vision AI backend or client heuristics
-  const processImageWithAI = async (imageDataUrl: string) => {
-    setIsProcessing(true);
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (auth.currentUser) {
-        try {
-          const idToken = await auth.currentUser.getIdToken();
-          if (idToken) {
-            headers["Authorization"] = `Bearer ${idToken}`;
-          }
-        } catch (tokenErr) {
-          console.warn("Could not retrieve Firebase ID token:", tokenErr);
-        }
-      }
+      setIsProcessing(true);
+      setStatusMessage("جاري تحضير وضغط الصورة...");
+      setErrorMessage(null);
 
-      const response = await fetch(getApiUrl("/api/scan-passport"), {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ imageBase64: imageDataUrl, mimeType: "image/jpeg" })
+      // Compress and resize image immediately
+      const compressedDataUrl = await compressImage(file, {
+        maxWidth: 1600,
+        maxHeight: 1600,
+        quality: 0.85
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.data) {
-          const { mrzLine1: l1, mrzLine2: l2, visualZone } = result.data;
-          if (l1) setMrzLine1(l1);
-          if (l2) setMrzLine2(l2);
-          if (visualZone) {
-            if (visualZone.firstName) {
-              setCandidateFirstName(visualZone.firstName);
-            }
-            if (visualZone.lastName) {
-              setCandidateLastName(visualZone.lastName);
-            }
-            if (!visualZone.firstName && !visualZone.lastName && (visualZone.fullName || visualZone.fullNameArabic)) {
-              const fullName = visualZone.fullNameArabic || visualZone.fullName || "";
-              const parts = fullName.trim().split(/\s+/);
-              if (parts.length > 1) {
-                setCandidateFirstName(parts.slice(0, -1).join(" "));
-                setCandidateLastName(parts[parts.length - 1]);
-              } else {
-                setCandidateFirstName(fullName);
-                setCandidateLastName(fullName);
-              }
-              setVisualName(fullName);
-            }
-            if (visualZone.passportNumber) setVisualPassportNo(visualZone.passportNumber);
-            if (visualZone.birthDate) setVisualBirthDate(visualZone.birthDate);
-            if (visualZone.expiryDate) setVisualExpiryDate(visualZone.expiryDate);
-            if (visualZone.gender) {
-              setVisualGender(visualZone.gender === "female" ? "female" : "male");
-            }
-            if (visualZone.nationality) setVisualNationality(visualZone.nationality);
-            if (visualZone.jobTitle) setVisualJob(visualZone.jobTitle);
-          }
-          setIsProcessing(false);
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn("AI Backend error, falling back to client-side parsing:", e);
+      setSelectedImage(compressedDataUrl);
+      await processImageWithAI(compressedDataUrl);
+    } catch (err: any) {
+      console.error("File reading error:", err);
+      setIsProcessing(false);
+      setErrorMessage("حدث خطأ أثناء قراءة ملف الصورة. يرجى تجربة صورة أخرى.");
     }
+  };
 
-    setIsProcessing(false);
+  // Process image with Gemini Vision AI backend (with fallback & compression)
+  const processImageWithAI = async (imageDataUrl: string) => {
+    setIsProcessing(true);
+    setStatusMessage("جاري فحص الجواز بالذكاء الاصطناعي واستخراج البيانات...");
+    setErrorMessage(null);
+
+    try {
+      // 1. Ensure optimal image dimensions for OCR
+      const optimizedImage = await compressImage(imageDataUrl, {
+        maxWidth: 1600,
+        maxHeight: 1600,
+        quality: 0.85
+      });
+
+      // 2. Make resilient API request
+      const res = await postJsonToApi<{
+        success: boolean;
+        data?: {
+          mrzLine1?: string;
+          mrzLine2?: string;
+          visualZone?: {
+            firstName?: string;
+            lastName?: string;
+            fullName?: string;
+            fullNameArabic?: string;
+            passportNumber?: string;
+            birthDate?: string;
+            expiryDate?: string;
+            gender?: string;
+            nationality?: string;
+            jobTitle?: string;
+          };
+        };
+        error?: string;
+      }>("/api/scan-passport", {
+        imageBase64: optimizedImage,
+        mimeType: "image/jpeg"
+      }, 30000);
+
+      if (res.success && res.data?.data) {
+        const { mrzLine1: l1, mrzLine2: l2, visualZone } = res.data.data;
+        if (l1) setMrzLine1(l1);
+        if (l2) setMrzLine2(l2);
+        
+        if (visualZone) {
+          if (visualZone.firstName) {
+            setCandidateFirstName(visualZone.firstName);
+          }
+          if (visualZone.lastName) {
+            setCandidateLastName(visualZone.lastName);
+          }
+          if (!visualZone.firstName && !visualZone.lastName && (visualZone.fullName || visualZone.fullNameArabic)) {
+            const fullName = visualZone.fullNameArabic || visualZone.fullName || "";
+            const parts = fullName.trim().split(/\s+/);
+            if (parts.length > 1) {
+              setCandidateFirstName(parts.slice(0, -1).join(" "));
+              setCandidateLastName(parts[parts.length - 1]);
+            } else {
+              setCandidateFirstName(fullName);
+              setCandidateLastName(fullName);
+            }
+            setVisualName(fullName);
+          }
+          if (visualZone.passportNumber) setVisualPassportNo(visualZone.passportNumber);
+          if (visualZone.birthDate) setVisualBirthDate(visualZone.birthDate);
+          if (visualZone.expiryDate) setVisualExpiryDate(visualZone.expiryDate);
+          if (visualZone.gender) {
+            setVisualGender(visualZone.gender === "female" ? "female" : "male");
+          }
+          if (visualZone.nationality) setVisualNationality(visualZone.nationality);
+          if (visualZone.jobTitle) setVisualJob(visualZone.jobTitle);
+        }
+
+        setStatusMessage("تم استخراج البيانات ومطابقتها بنجاح.");
+      } else {
+        const errorDetail = res.error || "تعذر قراءة الجواز تلقائياً";
+        setErrorMessage(`تنبيه: ${errorDetail} - يمكنك مراجعة الحقول أو إدخال البيانات يدوياً.`);
+      }
+    } catch (e: any) {
+      console.warn("AI Backend error, falling back to manual entry:", e);
+      setErrorMessage("تعذر الاتصال بالخادم السحابي - يمكنك إدخال البيانات يدوياً وتطبيقها فوراً.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // Load a built-in sample passport
@@ -302,6 +331,8 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
     setVisualNationality(sample.visual.nationality);
     setVisualJob(sample.visual.jobTitle || "عامل / عاملة");
     setSelectedImage(null);
+    setStatusMessage("تم تحميل النموذج التجريبي بنجاح.");
+    setErrorMessage(null);
   };
 
   // Apply parsed and verified data to Candidate Form
@@ -367,6 +398,15 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
     setCopiedReport(true);
     setTimeout(() => setCopiedReport(false), 2500);
   };
+
+  const hasAnyData = Boolean(
+    candidateFirstName.trim() ||
+    visualPassportNo.trim() ||
+    visualName.trim() ||
+    mrzLine1.trim() ||
+    mrzLine2.trim() ||
+    analysis
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/70 backdrop-blur-xs animate-in fade-in">
@@ -451,8 +491,23 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
           </button>
         </div>
 
-        {/* Modal Body - 2 Columns */}
+        {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+          {/* Status & Error Alerts */}
+          {errorMessage && (
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-2.5 text-xs text-amber-900 animate-in fade-in">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {statusMessage && !errorMessage && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-2 text-xs text-emerald-800 animate-in fade-in font-bold">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{statusMessage}</span>
+            </div>
+          )}
+
           {/* TOP SECTION: Input / Scan Panel according to Mode */}
           {activeMode === "UPLOAD" && (
             <div className="bg-white p-5 rounded-2xl border-2 border-dashed border-stone-300 text-center hover:border-[#172a46] transition-colors relative">
@@ -482,12 +537,12 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
                   <div className="text-right text-xs text-stone-600">
                     <p className="font-bold text-[#172a46]">تم تحميل الصورة</p>
                     {isProcessing ? (
-                      <p className="text-amber-600 flex items-center gap-1">
-                        <RefreshCw className="w-3 h-3 animate-spin" /> جاري التحليل والمسح الذكي...
+                      <p className="text-amber-600 flex items-center gap-1 font-bold">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" /> جاري التحليل والمسح الذكي...
                       </p>
                     ) : (
                       <p className="text-emerald-600 font-bold flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> تم التحليل بنجاح
+                        <CheckCircle2 className="w-3.5 h-3.5" /> جاهز للاعتماد
                       </p>
                     )}
                   </div>
@@ -534,10 +589,11 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
                 <div className="mt-4 flex items-center gap-3">
                   <button
                     onClick={captureSnapshot}
-                    className="bg-[#c9a84c] hover:bg-[#d8b759] text-[#172a46] px-6 py-2.5 rounded-2xl font-black text-sm shadow-lg flex items-center gap-2 transition-transform active:scale-95"
+                    disabled={isProcessing}
+                    className="bg-[#c9a84c] hover:bg-[#d8b759] text-[#172a46] px-6 py-2.5 rounded-2xl font-black text-sm shadow-lg flex items-center gap-2 transition-transform active:scale-95 disabled:opacity-50"
                   >
-                    <Camera className="w-4 h-4" />
-                    <span>التقاط وفحص الآن</span>
+                    {isProcessing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                    <span>{isProcessing ? "جاري المعالجة..." : "التقاط وفحص الآن"}</span>
                   </button>
                 </div>
               )}
@@ -999,8 +1055,8 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
 
             <button
               onClick={handleApply}
-              disabled={!analysis && !candidateFirstName && !visualPassportNo && !mrzLine1}
-              className="w-1/2 sm:w-auto bg-[#172a46] hover:bg-[#223d64] text-white px-6 py-2.5 rounded-2xl font-black text-xs shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 disabled:opacity-50"
+              disabled={!hasAnyData}
+              className="w-1/2 sm:w-auto bg-[#172a46] hover:bg-[#223d64] text-white px-6 py-2.5 rounded-2xl font-black text-xs shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 disabled:opacity-50 cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4 text-[#c9a84c]" />
               <span>اعتماد وتعبئة بيانات المرشح</span>
