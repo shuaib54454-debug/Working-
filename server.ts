@@ -3,26 +3,67 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { initializeApp, getApps, App } from "firebase-admin/app";
+import { getAuth, Auth } from "firebase-admin/auth";
 
 const app = express();
-const PORT = 3000;
 
-// Enable CORS for web, mobile Capacitor webviews, and external origins
+// Dynamically use process.env.PORT for Cloud Run (defaults to 8080 on Cloud Run, 3000 locally)
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+// Initialize Firebase Admin SDK (lazy / safe singleton)
+const FIREBASE_PROJECT_ID =
+  process.env.FIREBASE_PROJECT_ID ||
+  process.env.GCLOUD_PROJECT ||
+  process.env.GOOGLE_CLOUD_PROJECT ||
+  "gen-lang-client-0213401665";
+
+let adminApp: App | null = null;
+let adminAuth: Auth | null = null;
+
+function getFirebaseAuth(): Auth {
+  if (!adminAuth) {
+    try {
+      const existingApps = getApps();
+      if (existingApps.length === 0) {
+        adminApp = initializeApp({
+          projectId: FIREBASE_PROJECT_ID
+        });
+      } else {
+        adminApp = existingApps[0];
+      }
+      adminAuth = getAuth(adminApp);
+    } catch (initErr) {
+      console.warn("Firebase Admin initialize warning:", initErr);
+      // Fallback instance initialization
+      if (!adminApp) {
+        adminApp = initializeApp({ projectId: FIREBASE_PROJECT_ID }, "shuayb-admin");
+      }
+      adminAuth = getAuth(adminApp);
+    }
+  }
+  return adminAuth;
+}
+
+// Enable CORS for Web and Mobile Capacitor WebViews (Android localhost, Capacitor scheme, etc.)
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control"
+  );
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
   next();
 });
 
-// Body parser for JSON and large image payloads
+// Body parser for JSON and large base64 image payloads (up to 25MB)
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
-// Lazy Google Gen AI helper
+// Lazy Google Gen AI helper (server-side secret only)
 let aiClient: GoogleGenAI | null = null;
 function getAIClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -33,43 +74,86 @@ function getAIClient(): GoogleGenAI | null {
   return aiClient;
 }
 
-// Firebase ID Token Verification Middleware with Graceful Fallback
+/**
+ * Strict Server-Side Firebase ID Token Verification Middleware
+ * - No Authorization Bearer Token -> HTTP 401 Unauthorized
+ * - Invalid or Expired Token -> HTTP 401 Unauthorized
+ * - Valid Token -> Attaches authenticated user to req.user and proceeds
+ */
 async function verifyFirebaseIdToken(
   req: express.Request,
   res: express.Response,
   next: express.NextFunction
 ) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized: Missing or malformed Authorization header (Bearer token required)."
+    });
+  }
+
+  const idToken = authHeader.split("Bearer ")[1]?.trim();
+  if (!idToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized: Empty token provided."
+    });
+  }
+
   try {
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      const idToken = authHeader.split("Bearer ")[1]?.trim();
-      if (idToken) {
-        const apiKey = process.env.VITE_FIREBASE_API_KEY || "AIzaSyCiD_AWhbx1Ls1qTgVDR1Vy9zJGgrk7WrA";
-        const verifyUrl = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`;
+    const authService = getFirebaseAuth();
+    // Cryptographically verify ID token against Google's public keys for the project
+    const decodedToken = await authService.verifyIdToken(idToken, true);
 
-        const verifyResponse = await fetch(verifyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ idToken })
-        });
-
-        if (verifyResponse.ok) {
-          const userData = await verifyResponse.json();
-          if (userData.users && userData.users.length > 0) {
-            (req as any).user = userData.users[0];
-          }
-        }
-      }
+    if (!decodedToken || !decodedToken.uid) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Invalid token payload."
+      });
     }
-    // Proceed seamlessly
-    next();
-  } catch (error) {
-    console.warn("Auth token validation skipped:", error);
-    next();
+
+    // Attach verified user identity to request object
+    (req as any).user = decodedToken;
+    return next();
+  } catch (authError: any) {
+    console.warn("Firebase ID Token verification failed:", authError?.message || authError);
+
+    const errorMessage =
+      authError?.code === "auth/id-token-expired"
+        ? "Unauthorized: Token has expired. Please refresh session."
+        : authError?.code === "auth/id-token-revoked"
+        ? "Unauthorized: Token has been revoked."
+        : "Unauthorized: Invalid Firebase ID token.";
+
+    return res.status(401).json({
+      success: false,
+      error: errorMessage,
+      code: authError?.code || "UNAUTHORIZED"
+    });
   }
 }
 
-// Passport Scanning API Route with Gemini Vision + MRZ extraction (Protected by Firebase ID Token)
+/**
+ * Health Check Endpoint
+ * Available publicly without session cookies or AI Studio developer proxy.
+ * Does NOT leak any private secrets or API keys.
+ */
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    service: "shuayb-agency-backend",
+    hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+    projectId: FIREBASE_PROJECT_ID
+  });
+});
+
+/**
+ * Passport Scanning API Route with Gemini Vision + MRZ extraction
+ * Strictly Protected by Server-Side Firebase Authentication
+ */
 app.post("/api/scan-passport", verifyFirebaseIdToken, async (req, res) => {
   try {
     const { imageBase64, mimeType } = req.body;
@@ -81,10 +165,14 @@ app.post("/api/scan-passport", verifyFirebaseIdToken, async (req, res) => {
     const ai = getAIClient();
     if (!ai) {
       return res.status(503).json({
-        error: "GEMINI_API_KEY is not configured on the server",
-        fallback: true
+        error: "GEMINI_API_KEY is not configured on the server environment.",
+        fallback: false
       });
     }
+
+    // Log authorized request
+    const user = (req as any).user;
+    console.log(`[API] Authorized passport scan request by: ${user?.email || user?.uid}`);
 
     // Clean base64 string
     const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
@@ -130,7 +218,6 @@ Important Instructions:
 
     // Try models with quick retry on 503 high demand
     for (const modelName of modelsToTry) {
-      // Attempt up to 2 times per model with brief backoff for transient 503/429
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const response = await ai.models.generateContent({
@@ -165,21 +252,23 @@ Important Instructions:
         } catch (err: any) {
           lastError = err;
           const status = err?.status || err?.code;
-          const isHighDemand = status === 503 || status === "UNAVAILABLE" || (err?.message && err.message.includes("high demand"));
+          const isHighDemand =
+            status === 503 ||
+            status === "UNAVAILABLE" ||
+            (err?.message && err.message.includes("high demand"));
+
           console.warn(`Model ${modelName} (attempt ${attempt + 1}) encountered error:`, err?.message || err);
-          
+
           if (isHighDemand && attempt === 0) {
-            // Short backoff before 2nd attempt on same model
             await new Promise((resolve) => setTimeout(resolve, 600));
           } else {
-            // Move to next model
             break;
           }
         }
       }
 
       if (parsedResult) {
-        break; // Successfully got result
+        break;
       }
     }
 
@@ -195,17 +284,9 @@ Important Instructions:
     console.error("Error in /api/scan-passport:", error);
     return res.status(500).json({
       error: error.message || "Failed to process passport image",
-      fallback: true
+      fallback: false
     });
   }
-});
-
-// Health check route
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    hasGeminiKey: Boolean(process.env.GEMINI_API_KEY)
-  });
 });
 
 // Explicit PWA Endpoints for PWABuilder and Service Worker registration
@@ -230,7 +311,7 @@ app.get(["/manifest.json", "/manifest.webmanifest"], (req, res) => {
   res.status(404).send("Manifest not found");
 });
 
-// Route to download the compiled Android APK directly to phone
+// Route to download compiled Android APK if present
 app.get(["/api/download-apk", "/download/app-debug.apk", "/app-debug.apk"], (req, res) => {
   const apkPath = path.join(process.cwd(), "android/app/build/outputs/apk/debug/app-debug.apk");
   if (fs.existsSync(apkPath)) {
@@ -245,7 +326,7 @@ app.get(["/api/download-apk", "/download/app-debug.apk", "/app-debug.apk"], (req
 });
 
 async function startServer() {
-  // Vite middleware for development
+  // Vite middleware for development mode
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -261,7 +342,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`[Shuayb Agency Server] Listening on http://0.0.0.0:${PORT} (ENV: ${process.env.NODE_ENV || "development"})`);
   });
 }
 

@@ -1,0 +1,9 @@
+node_modules
+dist
+android
+.git
+.github
+*.apk
+*.log
+.env
+.env.local
