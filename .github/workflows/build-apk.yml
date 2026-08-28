@@ -39,12 +39,10 @@ jobs:
           cache: npm
 
       - name: 📦 Install Node Dependencies
-        run: |
-          npm ci --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
       - name: 🌐 Build Web Application (Vite)
-        run: |
-          npm run build:web
+        run: npm run build:web
 
       - name: 📱 Sync Android Platform (Capacitor)
         run: |
@@ -54,23 +52,28 @@ jobs:
       - name: ☕ Setup Java 21 (Temurin)
         uses: actions/setup-java@v5
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '21'
 
       - name: 🐘 Setup Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-          validate-wrappers: true
+          # The repository currently contains a wrapper JAR that Gradle's
+          # validation service does not recognize. Regenerate it below from
+          # the trusted Gradle distribution before invoking ./gradlew.
+          validate-wrappers: false
+
+      - name: 🧰 Regenerate and verify Gradle Wrapper
+        run: |
+          cd android
+          gradle wrapper --gradle-version 8.13 --distribution-type bin
+          chmod +x ./gradlew
+          test -s gradle/wrapper/gradle-wrapper.jar || { echo "❌ Gradle wrapper JAR was not generated."; exit 1; }
+          ./gradlew --version
 
       - name: 🤖 Setup Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: 🧪 Verify Gradle Wrapper
-        run: |
-          cd android
-          chmod +x ./gradlew
-          ./gradlew --version
 
       # ----------------- Debug Flow -----------------
       - name: 🔨 Build Debug APK
@@ -96,6 +99,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
           test -n "$KEYSTORE_BASE64" || { echo "❌ ANDROID_KEYSTORE_BASE64 is not configured."; exit 1; }
           test -n "$KEYSTORE_PASSWORD" || { echo "❌ ANDROID_KEYSTORE_PASSWORD is not configured."; exit 1; }
           test -n "$KEY_ALIAS" || { echo "❌ ANDROID_KEY_ALIAS is not configured."; exit 1; }
@@ -118,6 +122,7 @@ jobs:
       - name: ✍️ Verify APK Signature
         if: "${{ github.event.inputs.build_type != 'debug' }}"
         run: |
+          set -euo pipefail
           cd android
           APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
           test -n "$APKSIGNER" || { echo "❌ apksigner was not found."; exit 1; }
