@@ -1,13 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Default Deny All
+    // Default deny: every collection must opt in explicitly below.
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
     function isSignedIn() {
       return request.auth != null && request.auth.uid != null;
     }
@@ -16,91 +14,89 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
-    // Bootstrapped Admin check
     function isAdmin() {
       return isSignedIn() && (
+        request.auth.token.admin == true ||
         request.auth.token.email == "shuaib54454@gmail.com" ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
 
-    // Checks that the document is owned by the current authenticated user or is unassigned/admin
-    function isDocOwner() {
-      return isSignedIn() && (
-        isAdmin() ||
-        (resource != null && (
-          !('ownerUid' in resource.data) || 
-          resource.data.ownerUid == null || 
-          resource.data.ownerUid == '' || 
-          resource.data.ownerUid == request.auth.uid
-        ))
-      );
+    // Existing document must belong to the caller unless the caller is an admin.
+    function ownsExistingDocument() {
+      return isSignedIn() && resource != null && resource.data.ownerUid == request.auth.uid;
     }
 
-    // Checks that the created document has a valid ownerUid matching the user's UID or admin
-    function isCreatingWithOwner() {
-      return isSignedIn() && (
-        isAdmin() ||
-        (
-          'ownerUid' in request.resource.data &&
-          request.resource.data.ownerUid is string &&
-          (request.resource.data.ownerUid == request.auth.uid || request.resource.data.ownerUid == '')
-        )
-      );
+    // New candidate/expense documents must be explicitly owned by the caller.
+    function ownsNewDocument() {
+      return isSignedIn() &&
+        request.resource.data.ownerUid is string &&
+        request.resource.data.ownerUid == request.auth.uid;
     }
 
-    // Ensures the user is the owner AND that ownerUid can be adopted or maintained
-    function isUpdatingWithOwner() {
-      return isSignedIn() && (
-        isAdmin() ||
-        isDocOwner() ||
-        (
-          'ownerUid' in request.resource.data &&
-          request.resource.data.ownerUid == request.auth.uid
-        )
-      );
+    // Updates must preserve ownership. A caller can never change ownerUid to another UID.
+    function ownsUpdatedDocument() {
+      return isSignedIn() &&
+        ownsExistingDocument() &&
+        request.resource.data.ownerUid is string &&
+        request.resource.data.ownerUid == request.auth.uid;
     }
 
-    // 1. Candidates Collection
+    // 1. Candidates
     match /candidates/{candidateId} {
-      allow get, list: if isSignedIn() && (isDocOwner() || isAdmin());
-      allow create: if isCreatingWithOwner() && isValidId(candidateId);
-      allow update: if isUpdatingWithOwner() && isValidId(candidateId);
-      allow delete: if (isDocOwner() || isAdmin()) && isValidId(candidateId);
+      allow get, list: if isAdmin() || ownsExistingDocument();
+      allow create: if isAdmin() || (isValidId(candidateId) && ownsNewDocument());
+      allow update: if isAdmin() || (isValidId(candidateId) && ownsUpdatedDocument());
+      allow delete: if isAdmin() || (isValidId(candidateId) && ownsExistingDocument());
     }
 
-    // 2. Operating Expenses Collection
+    // 2. Operating expenses
     match /expenses/{expenseId} {
-      allow get, list: if isSignedIn() && (isDocOwner() || isAdmin());
-      allow create: if isCreatingWithOwner() && isValidId(expenseId);
-      allow update: if isUpdatingWithOwner() && isValidId(expenseId);
-      allow delete: if (isDocOwner() || isAdmin()) && isValidId(expenseId);
+      allow get, list: if isAdmin() || ownsExistingDocument();
+      allow create: if isAdmin() || (isValidId(expenseId) && ownsNewDocument());
+      allow update: if isAdmin() || (isValidId(expenseId) && ownsUpdatedDocument());
+      allow delete: if isAdmin() || (isValidId(expenseId) && ownsExistingDocument());
     }
 
-    // 3. Agency Settings Collection
+    // 3. Agency settings are isolated by document ID/ownerUid.
     match /settings/{settingId} {
-      allow get, list: if isSignedIn() && (
-        isDocOwner() ||
-        isAdmin() ||
-        settingId == request.auth.uid ||
-        settingId == 'agency_config'
+      allow get: if isAdmin() || (
+        isSignedIn() &&
+        settingId == request.auth.uid &&
+        resource != null &&
+        resource.data.ownerUid == request.auth.uid
       );
-      allow create: if isSignedIn() && isValidId(settingId);
-      allow update: if isSignedIn() && isValidId(settingId);
-      allow delete: if isSignedIn() && isValidId(settingId) && (isDocOwner() || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin() || (
+        isSignedIn() &&
+        settingId == request.auth.uid &&
+        request.resource.data.ownerUid == request.auth.uid
+      );
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        settingId == request.auth.uid &&
+        resource != null &&
+        resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.ownerUid == request.auth.uid
+      );
+      allow delete: if isAdmin() || (
+        isSignedIn() &&
+        settingId == request.auth.uid &&
+        resource != null &&
+        resource.data.ownerUid == request.auth.uid
+      );
     }
 
-    // 4. Admins Collection
+    // 4. Admin registry: users can only read their own admin record; admins can manage all.
     match /admins/{adminId} {
-      allow read: if isSignedIn();
+      allow read: if isAdmin() || (isSignedIn() && adminId == request.auth.uid);
       allow write: if isAdmin();
     }
 
-    // 5. System Health Check
+    // 5. System health document is not a public write surface.
     match /_system/{docId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
   }
 }
-
-
