@@ -47,6 +47,15 @@ jobs:
       - name: 🧪 Strict Passport MRZ Tests
         run: npm test
 
+      - name: 🛡️ Block unsafe passport fallback placeholders
+        run: |
+          set -euo pipefail
+          if grep -RniE 'P\\"? \\+|Math\\.random\\(\\).*passport|P0000000|setCandidateFirstName\\(\\"المرشح\\"\\)' src/components src/lib --include='*.ts' --include='*.tsx'; then
+            echo "❌ Unsafe passport placeholder/random fallback detected in production source."
+            exit 1
+          fi
+          echo "✅ No unsafe passport placeholder fallback detected."
+
       - name: 🌐 Build Web Application (Vite)
         run: npm run build:web
 
