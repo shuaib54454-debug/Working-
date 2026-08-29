@@ -22,9 +22,19 @@ const PLACEHOLDERS = new Set([
   "p0000000"
 ]);
 
+const ISO_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
 const isPlaceholder = (value: string) => {
   const normalized = value.trim().toLowerCase();
   return !normalized || PLACEHOLDERS.has(normalized);
+};
+
+const parseStrictDate = (value: string): Date | null => {
+  if (!ISO_DATE.test(value)) return null;
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  if (date.toISOString().slice(0, 10) !== value) return null;
+  return date;
 };
 
 export function canApprovePassportData(input: PassportApprovalInput): PassportApprovalResult {
@@ -41,11 +51,12 @@ export function canApprovePassportData(input: PassportApprovalInput): PassportAp
     return { allowed: false, reason: "رقم الجواز غير صالح." };
   }
 
-  const birth = new Date(`${input.birthDate}T00:00:00Z`);
-  const expiry = new Date(`${input.expiryDate}T00:00:00Z`);
-  const today = new Date(`${input.today ?? new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const birth = parseStrictDate(input.birthDate);
+  const expiry = parseStrictDate(input.expiryDate);
+  const todayValue = input.today ?? new Date().toISOString().slice(0, 10);
+  const today = parseStrictDate(todayValue);
 
-  if (Number.isNaN(birth.getTime()) || Number.isNaN(expiry.getTime()) || Number.isNaN(today.getTime())) {
+  if (!birth || !expiry || !today) {
     return { allowed: false, reason: "تاريخ الميلاد أو انتهاء الجواز غير صالح." };
   }
 
