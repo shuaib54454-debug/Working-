@@ -37,6 +37,8 @@ jobs:
         if: "${{ github.head_ref == 'security/p0-hardening' || github.ref == 'refs/heads/security/p0-hardening' }}"
         run: |
           set -euo pipefail
+          git fetch origin security/p0-hardening
+          git checkout -B security/p0-hardening origin/security/p0-hardening
           python3 - <<'PY'
           from pathlib import Path
           path = Path("src/components/PassportScannerModal.tsx")
@@ -45,11 +47,12 @@ jobs:
               'setCandidateFirstName("المرشح");': 'setCandidateFirstName("");',
               'setVisualPassportNo("P" + Math.floor(10000000 + Math.random() * 90000000));': 'setVisualPassportNo("");',
               'fName = analysis?.mrz?.givenNames || "المرشح";': 'fName = analysis?.mrz?.givenNames || "";',
-              'lName = analysis?.mrz?.surname && analysis?.mrz?.surname !== "المرشح" ? analysis?.mrz?.surname : fName;': 'lName = analysis?.mrz?.surname && analysis?.mrz?.surname !== "المرشح" ? analysis?.mrz?.surname : fName;',
               'lName = fName || "المرشح";': 'lName = fName;',
               'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "P0000000";': 'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "";',
               'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "2030-01-01";': 'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "";',
-              'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";': 'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";'
+              'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";': 'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";',
+              'firstName: fName || "المرشح",': 'firstName: fName,',
+              'lastName: lName || "المرشح",': 'lastName: lName,'
           }
           changed = False
           for old, new in replacements.items():
@@ -67,7 +70,7 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add src/components/PassportScannerModal.tsx
             git commit -m "security: remove unsafe passport placeholder fallbacks"
-            git push origin "HEAD:security/p0-hardening"
+            git push origin HEAD:security/p0-hardening
             echo "✅ Passport hardening committed to security/p0-hardening."
           fi
 
