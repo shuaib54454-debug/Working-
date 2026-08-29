@@ -393,8 +393,8 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
     const cntry = visualNationality || analysis?.mrz?.nationalityName || "المملكة العربية السعودية";
 
     onApplyData({
-      firstName: fName || "المرشح",
-      lastName: lName || "المرشح",
+      firstName: fName,
+      lastName: lName,
       passportNumber: passNo,
       passportExpiryDate: passExp,
       dateOfBirth: bDate,
