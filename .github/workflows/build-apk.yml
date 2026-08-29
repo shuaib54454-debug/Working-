@@ -60,10 +60,7 @@ jobs:
                   text = text.replace(old, new)
                   changed = True
           path.write_text(text, encoding="utf-8")
-          if changed:
-              print("✅ Unsafe passport fallback values removed from PassportScannerModal.tsx")
-          else:
-              print("✅ Passport fallback hardening already applied")
+          print("✅ Unsafe passport fallback values removed from PassportScannerModal.tsx" if changed else "✅ Passport fallback hardening already applied")
           PY
           if ! git diff --quiet -- src/components/PassportScannerModal.tsx; then
             git config user.name "github-actions[bot]"
@@ -129,7 +126,6 @@ jobs:
       - name: 🤖 Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # ----------------- Debug Flow -----------------
       - name: 🔨 Build Debug APK
         if: "${{ github.event.inputs.build_type == 'debug' }}"
         run: |
@@ -144,7 +140,6 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
 
-      # ----------------- Release Flow with Keystore Signing -----------------
       - name: 🔐 Require and validate production signing secrets
         if: "${{ github.event.inputs.build_type != 'debug' }}"
         env:
@@ -158,18 +153,9 @@ jobs:
           test -n "$KEYSTORE_PASSWORD" || { echo "❌ ANDROID_KEYSTORE_PASSWORD is not configured."; exit 1; }
           test -n "$KEY_ALIAS" || { echo "❌ ANDROID_KEY_ALIAS is not configured."; exit 1; }
           test -n "$KEY_PASSWORD" || { echo "❌ ANDROID_KEY_PASSWORD is not configured."; exit 1; }
-
           printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/shuayb-release-key.jks
           test -s android/app/shuayb-release-key.jks || { echo "❌ Decoded keystore is empty."; exit 1; }
-
-          keytool -list \
-            -keystore android/app/shuayb-release-key.jks \
-            -storepass "$KEYSTORE_PASSWORD" \
-            -alias "$KEY_ALIAS" >/dev/null || {
-              echo "❌ Keystore validation failed. Check the Base64, keystore password, and alias.";
-              exit 1;
-            }
-
+          keytool -list -keystore android/app/shuayb-release-key.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null || { echo "❌ Keystore validation failed. Check the Base64, keystore password, and alias."; exit 1; }
           echo "ANDROID_KEYSTORE_FILE=shuayb-release-key.jks" >> "$GITHUB_ENV"
           echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
           echo "ANDROID_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
@@ -189,21 +175,12 @@ jobs:
           cd android
           APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
           test -n "$APKSIGNER" || { echo "❌ apksigner was not found."; exit 1; }
-
           APK="app/build/outputs/apk/release/app-release.apk"
           UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
-
           if [ ! -f "$APK" ] && [ -f "$UNSIGNED" ]; then
             echo "Signing release APK manually with apksigner..."
-            "$APKSIGNER" sign \
-              --ks app/shuayb-release-key.jks \
-              --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
-              --ks-key-alias "$ANDROID_KEY_ALIAS" \
-              --key-pass "pass:$ANDROID_KEY_PASSWORD" \
-              --out "$APK" \
-              "$UNSIGNED"
+            "$APKSIGNER" sign --ks app/shuayb-release-key.jks --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass "pass:$ANDROID_KEY_PASSWORD" --out "$APK" "$UNSIGNED"
           fi
-
           test -f "$APK" || { echo "❌ Release APK was not produced."; exit 1; }
           "$APKSIGNER" verify --verbose "$APK"
           echo "🎉 APK is signed successfully: android/$APK"
