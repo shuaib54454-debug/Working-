@@ -3,10 +3,10 @@ import { Capacitor } from "@capacitor/core";
 import { auth } from "./firebase";
 
 /**
- * Default Dedicated Production Cloud Run Backend URL
+ * Default Dedicated Production Backend URL (Render Cloud Service)
  * This is built directly into the client code so no manual entry is required.
  */
-export const DEFAULT_PRODUCTION_BACKEND = "https://ais-pre-lcyhq5hqe53iw7xy4xblqz-343361401430.europe-west2.run.app";
+export const DEFAULT_PRODUCTION_BACKEND = "https://working-1-pl1j.onrender.com";
 
 /**
  * Returns the active base URL for backend API requests.
