@@ -91,7 +91,7 @@ jobs:
           retention-days: 30
 
       # ----------------- Release Flow with Keystore Signing -----------------
-      - name: 🔐 Require Production Signing Secrets
+      - name: 🔐 Require and validate production signing secrets
         if: "${{ github.event.inputs.build_type != 'debug' }}"
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -105,13 +105,23 @@ jobs:
           test -n "$KEY_ALIAS" || { echo "❌ ANDROID_KEY_ALIAS is not configured."; exit 1; }
           test -n "$KEY_PASSWORD" || { echo "❌ ANDROID_KEY_PASSWORD is not configured."; exit 1; }
 
-          echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > android/app/shuayb-release-key.jks
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/shuayb-release-key.jks
           test -s android/app/shuayb-release-key.jks || { echo "❌ Decoded keystore is empty."; exit 1; }
+
+          # Validate the decoded keystore and credentials before Gradle starts.
+          keytool -list \
+            -keystore android/app/shuayb-release-key.jks \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -alias "$KEY_ALIAS" >/dev/null || {
+              echo "❌ Keystore validation failed. Check the Base64, keystore password, and alias.";
+              exit 1;
+            }
 
           echo "ANDROID_KEYSTORE_FILE=shuayb-release-key.jks" >> "$GITHUB_ENV"
           echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
           echo "ANDROID_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
           echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+          echo "✅ Production keystore and alias validated successfully."
 
       - name: 🔨 Assemble Release APK
         if: "${{ github.event.inputs.build_type != 'debug' }}"
