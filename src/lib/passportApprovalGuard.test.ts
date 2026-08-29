@@ -36,6 +36,18 @@ describe("canApprovePassportData", () => {
     }).allowed, true);
   });
 
+  it("rejects malformed calendar dates instead of normalizing them", () => {
+    assert.equal(canApprovePassportData({
+      hasVerifiedMrz: true,
+      passportNumber: "A12345678",
+      firstName: "JOHN",
+      lastName: "DOE",
+      birthDate: "1990-02-30",
+      expiryDate: "2030-01-01",
+      today: "2026-08-29"
+    }).allowed, false);
+  });
+
   it("rejects an expired passport", () => {
     assert.equal(canApprovePassportData({
       hasVerifiedMrz: true,
