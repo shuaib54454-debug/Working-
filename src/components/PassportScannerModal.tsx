@@ -324,14 +324,14 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
         setStatusMessage("تم استخراج البيانات ومطابقتها بنجاح.");
       } else {
         // Fallback: Enable manual entry with photo ready for submission
-        setCandidateFirstName("المرشح");
-        setVisualPassportNo("P" + Math.floor(10000000 + Math.random() * 90000000));
+        setCandidateFirstName("");
+        setVisualPassportNo("");
         setErrorMessage("تنبيه: يمكنك الآن مراجعة وتعديل الحقول أدناه واعتماد بيانات المرشح مباشرة.");
       }
     } catch (e: any) {
       console.warn("AI scanning error, enabling manual entry fallback:", e);
-      setCandidateFirstName("المرشح");
-      setVisualPassportNo("P" + Math.floor(10000000 + Math.random() * 90000000));
+      setCandidateFirstName("");
+      setVisualPassportNo("");
       setErrorMessage("تنبيه: يمكنك مراجعة وتعديل الحقول أدناه واعتماد بيانات المرشح مباشرة.");
     } finally {
       setIsProcessing(false);
@@ -383,18 +383,18 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
     }
 
     if (!lName) {
-      lName = fName || "المرشح";
+      lName = fName;
     }
 
-    const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "P0000000";
-    const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "2030-01-01";
-    const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";
+    const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "";
+    const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "";
+    const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";
     const gndr = visualGender || (analysis?.mrz?.gender === "female" ? "female" : "male");
     const cntry = visualNationality || analysis?.mrz?.nationalityName || "المملكة العربية السعودية";
 
     onApplyData({
-      firstName: fName || "المرشح",
-      lastName: lName || "المرشح",
+      firstName: fName,
+      lastName: lName,
       passportNumber: passNo,
       passportExpiryDate: passExp,
       dateOfBirth: bDate,

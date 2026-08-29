@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - security/p0-hardening
   pull_request:
     branches:
       - main
@@ -32,18 +33,70 @@ jobs:
       - name: 📥 Checkout Codebase
         uses: actions/checkout@v4
 
+      - name: 🛡️ Persist safe passport fallback hardening
+        if: "${{ github.head_ref == 'security/p0-hardening' || github.ref == 'refs/heads/security/p0-hardening' }}"
+        run: |
+          set -euo pipefail
+          git fetch origin security/p0-hardening
+          git checkout -B security/p0-hardening origin/security/p0-hardening
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("src/components/PassportScannerModal.tsx")
+          text = path.read_text(encoding="utf-8")
+          replacements = {
+              'setCandidateFirstName("المرشح");': 'setCandidateFirstName("");',
+              'setVisualPassportNo("P" + Math.floor(10000000 + Math.random() * 90000000));': 'setVisualPassportNo("");',
+              'fName = analysis?.mrz?.givenNames || "المرشح";': 'fName = analysis?.mrz?.givenNames || "";',
+              'lName = fName || "المرشح";': 'lName = fName;',
+              'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "P0000000";': 'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "";',
+              'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "2030-01-01";': 'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "";',
+              'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";': 'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";',
+              'firstName: fName || "المرشح",': 'firstName: fName,',
+              'lastName: lName || "المرشح",': 'lastName: lName,'
+          }
+          changed = False
+          for old, new in replacements.items():
+              if old in text:
+                  text = text.replace(old, new)
+                  changed = True
+          path.write_text(text, encoding="utf-8")
+          print("✅ Unsafe passport fallback values removed from PassportScannerModal.tsx" if changed else "✅ Passport fallback hardening already applied")
+          PY
+          if ! git diff --quiet -- src/components/PassportScannerModal.tsx; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/components/PassportScannerModal.tsx
+            git commit -m "security: remove unsafe passport placeholder fallbacks"
+            git push origin HEAD:security/p0-hardening
+            echo "✅ Passport hardening committed to security/p0-hardening."
+          fi
+
       - name: 🟢 Setup Node.js 22.x (LTS)
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: 📦 Install Node Dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: 🧪 TypeScript Type Check
+        run: npm run lint
+
+      - name: 🧪 Strict Passport MRZ Tests
+        run: npm test
+
+      - name: 🛡️ Block unsafe passport fallback placeholders
         run: |
-          npm install --legacy-peer-deps
+          set -euo pipefail
+          if grep -RniE 'P\\"? \\+|Math\\.random\\(\\).*passport|P0000000|setCandidateFirstName\\(\\"المرشح\\"\\)' src/components --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
+            echo "❌ Unsafe passport placeholder/random fallback detected in production source."
+            exit 1
+          fi
+          echo "✅ No unsafe passport placeholder fallback detected in production components."
 
       - name: 🌐 Build Web Application (Vite)
-        run: |
-          npm run build:web
+        run: npm run build:web
 
       - name: 📱 Sync Android Platform (Capacitor)
         run: |
@@ -53,7 +106,7 @@ jobs:
       - name: ☕ Setup Java 21 (Temurin)
         uses: actions/setup-java@v5
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '21'
 
       - name: 🐘 Setup Gradle 8.13
@@ -62,16 +115,17 @@ jobs:
           gradle-version: '8.13'
           validate-wrappers: false
 
-      - name: 🤖 Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 🛠️ Ensure Clean Gradle Wrapper
+      - name: 🧰 Regenerate and verify Gradle Wrapper
         run: |
           cd android
           gradle wrapper --gradle-version 8.13 --distribution-type bin
           chmod +x ./gradlew
+          test -s gradle/wrapper/gradle-wrapper.jar || { echo "❌ Gradle wrapper JAR was not generated."; exit 1; }
+          ./gradlew --version
 
-      # ----------------- Debug Flow -----------------
+      - name: 🤖 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: 🔨 Build Debug APK
         if: "${{ github.event.inputs.build_type == 'debug' }}"
         run: |
@@ -86,27 +140,27 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
 
-      # ----------------- Release Flow with Keystore Signing -----------------
-      - name: 🔐 Setup Keystore & Auto-Sign Configuration
+      - name: 🔐 Require and validate production signing secrets
         if: "${{ github.event.inputs.build_type != 'debug' }}"
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > android/app/shuayb-release-key.jks
-            echo "✅ Custom Keystore decoded successfully."
-            echo "ANDROID_KEYSTORE_FILE=shuayb-release-key.jks" >> $GITHUB_ENV
-            echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
-            echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $GITHUB_ENV
-            echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $GITHUB_ENV
-          else
-            echo "⚡ Generating automatic signing keystore so the APK installs directly on Android..."
-            keytool -genkeypair -v -keystore android/app/shuayb-release-key.jks -alias shuayb -keyalg RSA -keysize 2048 -validity 10000 -storepass shuayb123456 -keypass shuayb123456 -dname "CN=Shuayb Agency, OU=Recruitment, O=Shuayb, L=Riyadh, ST=Riyadh, C=SA"
-            echo "ANDROID_KEYSTORE_FILE=shuayb-release-key.jks" >> $GITHUB_ENV
-            echo "ANDROID_KEYSTORE_PASSWORD=shuayb123456" >> $GITHUB_ENV
-            echo "ANDROID_KEY_ALIAS=shuayb" >> $GITHUB_ENV
-            echo "ANDROID_KEY_PASSWORD=shuayb123456" >> $GITHUB_ENV
-          fi
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo "❌ ANDROID_KEYSTORE_BASE64 is not configured."; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "❌ ANDROID_KEYSTORE_PASSWORD is not configured."; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "❌ ANDROID_KEY_ALIAS is not configured."; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "❌ ANDROID_KEY_PASSWORD is not configured."; exit 1; }
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/shuayb-release-key.jks
+          test -s android/app/shuayb-release-key.jks || { echo "❌ Decoded keystore is empty."; exit 1; }
+          keytool -list -keystore android/app/shuayb-release-key.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null || { echo "❌ Keystore validation failed. Check the Base64, keystore password, and alias."; exit 1; }
+          echo "ANDROID_KEYSTORE_FILE=shuayb-release-key.jks" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+          echo "✅ Production keystore and alias validated successfully."
 
       - name: 🔨 Assemble Release APK
         if: "${{ github.event.inputs.build_type != 'debug' }}"
@@ -114,33 +168,29 @@ jobs:
           cd android
           ./gradlew assembleRelease --stacktrace --no-daemon
 
-      - name: ✍️ Ensure APK is Signed (Zipalign & apksigner)
+      - name: ✍️ Verify APK Signature
         if: "${{ github.event.inputs.build_type != 'debug' }}"
         run: |
+          set -euo pipefail
           cd android
-          APKSIGNER=$(find $ANDROID_SDK_ROOT/build-tools -name apksigner 2>/dev/null | sort -V | tail -n 1)
-          
-          # Check if signed APK was produced by gradle
-          if [ ! -f "app/build/outputs/apk/release/app-release.apk" ] && [ -f "app/build/outputs/apk/release/app-release-unsigned.apk" ]; then
-            echo "Signing app-release-unsigned.apk manually with apksigner..."
-            $APKSIGNER sign --ks app/shuayb-release-key.jks --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass "pass:$ANDROID_KEY_PASSWORD" --out app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/app-release-unsigned.apk
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
+          test -n "$APKSIGNER" || { echo "❌ apksigner was not found."; exit 1; }
+          APK="app/build/outputs/apk/release/app-release.apk"
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ ! -f "$APK" ] && [ -f "$UNSIGNED" ]; then
+            echo "Signing release APK manually with apksigner..."
+            "$APKSIGNER" sign --ks app/shuayb-release-key.jks --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass "pass:$ANDROID_KEY_PASSWORD" --out "$APK" "$UNSIGNED"
           fi
-
-          echo "=========================================="
-          echo "Verifying final APK Signature..."
-          echo "=========================================="
-          if [ -f "app/build/outputs/apk/release/app-release.apk" ]; then
-            $APKSIGNER verify --verbose app/build/outputs/apk/release/app-release.apk
-            echo "🎉 APK is ready and signed for installation: app/build/outputs/apk/release/app-release.apk"
-          fi
+          test -f "$APK" || { echo "❌ Release APK was not produced."; exit 1; }
+          "$APKSIGNER" verify --verbose "$APK"
+          echo "🎉 APK is signed successfully: android/$APK"
 
       - name: 📤 Upload Release APK Artifact
         if: "${{ github.event.inputs.build_type != 'debug' }}"
         uses: actions/upload-artifact@v4
         with:
           name: shuayb-recruitment-app-release
-          path: |
-            android/app/build/outputs/apk/release/*.apk
+          path: android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       - name: 🧹 Secure Keystore Cleanup
