@@ -2,7 +2,8 @@ name: Final Passport Hardening
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -18,8 +19,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
+          python3 <<'PY'
           from pathlib import Path
+          import re
 
           scanner = Path('src/components/PassportScannerModal.tsx')
           text = scanner.read_text(encoding='utf-8')
@@ -31,19 +33,17 @@ jobs:
                   raise SystemExit('Missing scanner import anchor')
               text = text.replace(anchor, anchor + '\n' + import_line, 1)
 
-          replacements = {
-              'fName = analysis?.mrz?.givenNames || "المرشح";': 'fName = analysis?.mrz?.givenNames || "";',
-              'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "P0000000";': 'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "";',
-              'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "2030-01-01";': 'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "";',
-              'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";': 'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";',
-              'firstName: fName || "المرشح",': 'firstName: fName,',
-              'lastName: lName || "المرشح",': 'lastName: lName,'
-          }
-          for old, new in replacements.items():
-              text = text.replace(old, new)
+          text = text.replace('fName = analysis?.mrz?.givenNames || "المرشح";', 'fName = analysis?.mrz?.givenNames || "";')
+          text = text.replace('const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "P0000000";', 'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "";')
+          text = text.replace('const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "2030-01-01";', 'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "";')
+          text = text.replace('const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";', 'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";')
+          text = text.replace('firstName: fName || "المرشح",', 'firstName: fName,')
+          text = text.replace('lastName: lName || "المرشح",', 'lastName: lName,')
 
-          approval_anchor = '    onApplyData({\n      firstName: fName,'
-          approval_block = '''    const approval = canApprovePassportData({
+          if 'const approval = canApprovePassportData({' not in text:
+              anchor = '''    onApplyData({
+      firstName: fName,'''
+              block = '''    const approval = canApprovePassportData({
       hasVerifiedMrz: Boolean(analysis?.mrz?.checksums?.allValid),
       passportNumber: passNo,
       firstName: fName,
@@ -59,26 +59,24 @@ jobs:
 
     onApplyData({
       firstName: fName,'''
-          if 'const approval = canApprovePassportData({' not in text:
-              if approval_anchor not in text:
-                  raise SystemExit('Missing scanner approval anchor')
-              text = text.replace(approval_anchor, approval_block, 1)
+              if anchor not in text:
+                  raise SystemExit('Missing handleApply anchor')
+              text = text.replace(anchor, block, 1)
 
           scanner.write_text(text, encoding='utf-8')
 
           guard = Path('src/lib/passportApprovalGuard.ts')
           g = guard.read_text(encoding='utf-8')
-          g = g.replace('  "p0000000"\n', '')
-          marker = 'const isPlaceholder = (value: string) => {'
-          if marker not in g:
-              raise SystemExit('Missing placeholder function anchor')
-          if 'if (/^p0{7}$/i.test(value.trim())) return true;' not in g:
-              g = g.replace(marker, marker + '\n  if (/^p0{7}$/i.test(value.trim())) return true;', 1)
+          if 'if (/^p0{7}$/i.test(normalized)) return true;' not in g:
+              marker = '  const normalized = value.trim().toLowerCase();'
+              if marker not in g:
+                  raise SystemExit('Missing placeholder normalization anchor')
+              g = g.replace(marker, marker + '\n  if (/^p0{7}$/i.test(normalized)) return true;', 1)
           guard.write_text(g, encoding='utf-8')
           PY
 
-          if grep -RniE 'P\\"? \\+|Math\\.random\\(\\).*passport|P0000000|setCandidateFirstName\\(\\"المرشح\\"\\)' src/components src/lib --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
-            echo '❌ Unsafe passport placeholder/random fallback remains.'
+          if grep -RniE 'P0000000|Math\.random\(\).*passport|setCandidateFirstName\("المرشح"\)' src/components src/lib --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
+            echo 'Unsafe passport placeholder/random fallback remains.'
             exit 1
           fi
 
