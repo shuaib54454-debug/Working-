@@ -10,3 +10,5 @@ This document records the security/build hardening applied to the `security/p0-h
 - CI regenerates the Gradle wrapper from the trusted Gradle 8.13 distribution before building.
 
 Passport OCR fallback remains a separate change because a Gemini secret must never be embedded in the Android client.
+
+Passport approval hardening is now enforced at the scanner approval boundary.
