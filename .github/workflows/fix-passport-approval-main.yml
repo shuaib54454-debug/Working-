@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   harden:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -27,7 +26,6 @@ jobs:
           text = path.read_text(encoding="utf-8")
           changed = False
 
-          # Remove invented fallback values from production behavior.
           replacements = {
               'setCandidateFirstName("المرشح");': 'setCandidateFirstName("");',
               'setVisualPassportNo("P" + Math.floor(10000000 + Math.random() * 90000000));': 'setVisualPassportNo("");',
@@ -44,7 +42,6 @@ jobs:
                   text = text.replace(old, new)
                   changed = True
 
-          # Use the existing strict approval guard at the actual approval boundary.
           import_anchor = 'import { compressImage } from "../lib/imageUtils";'
           import_line = 'import { canApprovePassportData } from "../lib/passportApprovalGuard";'
           if import_anchor in text and import_line not in text:
