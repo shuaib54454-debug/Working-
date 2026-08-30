@@ -1,9 +1,6 @@
 name: Final Passport Hardening
 
-on:
-  push:
-    branches:
-      - main
+on: push
 
 permissions:
   contents: write
@@ -12,38 +9,29 @@ jobs:
   harden:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Harden passport approval path
-        shell: bash
+      - name: Harden production passport approval
         run: |
           set -euo pipefail
-          python3 <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
-          import re
 
-          scanner = Path('src/components/PassportScannerModal.tsx')
-          text = scanner.read_text(encoding='utf-8')
-
-          import_line = 'import { canApprovePassportData } from "../lib/passportApprovalGuard";'
-          if import_line not in text:
-              anchor = 'import { compressImage } from "../lib/imageUtils";'
-              if anchor not in text:
-                  raise SystemExit('Missing scanner import anchor')
-              text = text.replace(anchor, anchor + '\n' + import_line, 1)
-
-          text = text.replace('fName = analysis?.mrz?.givenNames || "المرشح";', 'fName = analysis?.mrz?.givenNames || "";')
-          text = text.replace('const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "P0000000";', 'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "";')
-          text = text.replace('const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "2030-01-01";', 'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "";')
-          text = text.replace('const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";', 'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";')
-          text = text.replace('firstName: fName || "المرشح",', 'firstName: fName,')
-          text = text.replace('lastName: lName || "المرشح",', 'lastName: lName,')
-
-          if 'const approval = canApprovePassportData({' not in text:
-              anchor = '''    onApplyData({
+          p = Path('src/components/PassportScannerModal.tsx')
+          s = p.read_text(encoding='utf-8')
+          imp = 'import { canApprovePassportData } from "../lib/passportApprovalGuard";'
+          if imp not in s:
+              s = s.replace('import { compressImage } from "../lib/imageUtils";', 'import { compressImage } from "../lib/imageUtils";\n' + imp, 1)
+          s = s.replace('fName = analysis?.mrz?.givenNames || "المرشح";', 'fName = analysis?.mrz?.givenNames || "";')
+          s = s.replace('const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "P0000000";', 'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "";')
+          s = s.replace('const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "2030-01-01";', 'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "";')
+          s = s.replace('const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";', 'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";')
+          s = s.replace('firstName: fName || "المرشح",', 'firstName: fName,')
+          s = s.replace('lastName: lName || "المرشح",', 'lastName: lName,')
+          if 'const approval = canApprovePassportData({' not in s:
+              old = '''    onApplyData({
       firstName: fName,'''
-              block = '''    const approval = canApprovePassportData({
+              new = '''    const approval = canApprovePassportData({
       hasVerifiedMrz: Boolean(analysis?.mrz?.checksums?.allValid),
       passportNumber: passNo,
       firstName: fName,
@@ -59,27 +47,19 @@ jobs:
 
     onApplyData({
       firstName: fName,'''
-              if anchor not in text:
-                  raise SystemExit('Missing handleApply anchor')
-              text = text.replace(anchor, block, 1)
+              if old not in s:
+                  raise SystemExit('handleApply anchor not found')
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
 
-          scanner.write_text(text, encoding='utf-8')
-
-          guard = Path('src/lib/passportApprovalGuard.ts')
-          g = guard.read_text(encoding='utf-8')
+          gpath = Path('src/lib/passportApprovalGuard.ts')
+          g = gpath.read_text(encoding='utf-8')
           if 'if (/^p0{7}$/i.test(normalized)) return true;' not in g:
-              marker = '  const normalized = value.trim().toLowerCase();'
-              if marker not in g:
-                  raise SystemExit('Missing placeholder normalization anchor')
-              g = g.replace(marker, marker + '\n  if (/^p0{7}$/i.test(normalized)) return true;', 1)
-          guard.write_text(g, encoding='utf-8')
+              g = g.replace('  const normalized = value.trim().toLowerCase();', '  const normalized = value.trim().toLowerCase();\n  if (/^p0{7}$/i.test(normalized)) return true;', 1)
+          gpath.write_text(g, encoding='utf-8')
           PY
 
-          if grep -RniE 'P0000000|Math\.random\(\).*passport|setCandidateFirstName\("المرشح"\)' src/components src/lib --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
-            echo 'Unsafe passport placeholder/random fallback remains.'
-            exit 1
-          fi
-
+          ! grep -RniE 'P0000000|Math\.random\(\).*passport|setCandidateFirstName\("المرشح"\)' src/components src/lib --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'
           npm ci --legacy-peer-deps
           npm run lint
           npm test
@@ -88,9 +68,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/components/PassportScannerModal.tsx src/lib/passportApprovalGuard.ts
-          if git diff --cached --quiet; then
-            echo 'No source changes required.'
-            exit 0
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: require verified passport data before candidate approval'
+            git push origin HEAD:main
           fi
-          git commit -m 'fix: require verified passport data before candidate approval'
-          git push origin HEAD:main
