@@ -10,20 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply production hardening
+      - name: Remove production passport placeholders
         shell: bash
         run: |
           set -euo pipefail
-          sed -i '/import { compressImage } from "..\/lib\/imageUtils";/a import { canApprovePassportData } from "..\/lib\/passportApprovalGuard";' src/components/PassportScannerModal.tsx
-          sed -i 's/fName = analysis?.mrz?.givenNames || "المرشح";/fName = analysis?.mrz?.givenNames || "";/' src/components/PassportScannerModal.tsx
-          sed -i 's/const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "P0000000";/const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "";/' src/components/PassportScannerModal.tsx
-          sed -i 's/const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "2030-01-01";/const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "";/' src/components/PassportScannerModal.tsx
-          sed -i 's/const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";/const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";/' src/components/PassportScannerModal.tsx
-          sed -i 's/firstName: fName || "المرشح",/firstName: fName,/' src/components/PassportScannerModal.tsx
-          sed -i 's/lastName: lName || "المرشح",/lastName: lName,/' src/components/PassportScannerModal.tsx
-          python3 -c 'from pathlib import Path; p=Path("src/components/PassportScannerModal.tsx"); s=p.read_text(); a="    onApplyData({\n      firstName: fName,"; b="    const approval = canApprovePassportData({\n      hasVerifiedMrz: Boolean(analysis?.mrz?.checksums?.allValid),\n      passportNumber: passNo,\n      firstName: fName,\n      lastName: lName,\n      birthDate: bDate,\n      expiryDate: passExp\n    });\n\n    if (!approval.allowed) {\n      setErrorMessage(approval.reason || \"لا يمكن اعتماد بيانات الجواز قبل اكتمال الفحص والمطابقة.\");\n      return;\n    }\n\n    onApplyData({\n      firstName: fName,"; assert a in s; p.write_text(s.replace(a,b,1))'
-          python3 -c 'from pathlib import Path; p=Path("src/lib/passportApprovalGuard.ts"); s=p.read_text(); a="  const normalized = value.trim().toLowerCase();"; b=a+"\n  if (/^p0{7}$/i.test(normalized)) return true;"; assert a in s; p.write_text(s.replace(a,b,1))'
-          if grep -RniE 'P0000000|Math\.random\(\).*passport|setCandidateFirstName\("المرشح"\)' src/components src/lib --include="*.ts" --include="*.tsx" --exclude="*.test.ts" --exclude="*.test.tsx"; then exit 1; fi
+          python3 -c 'from pathlib import Path; p=Path("src/components/PassportScannerModal.tsx"); s=p.read_text(encoding="utf-8"); s=s.replace("fName = analysis?.mrz?.givenNames || \\\"المرشح\\\";", "fName = analysis?.mrz?.givenNames || \\\"\\\";"); p.write_text(s,encoding="utf-8")'
+          python3 -c 'from pathlib import Path; p=Path("src/lib/passportApprovalGuard.ts"); s=p.read_text(encoding="utf-8"); s=s.replace("  \\\"المرشح\\\",\\n", ""); p.write_text(s,encoding="utf-8")'
+          ! grep -RniE 'P0000000|Math\.random\(\).*passport|setCandidateFirstName\("المرشح"\)|givenNames \|\| "المرشح"' src/components src/lib --include="*.ts" --include="*.tsx" --exclude="*.test.ts" --exclude="*.test.tsx"
           npm ci --legacy-peer-deps
           npm run lint
           npm test
@@ -32,6 +25,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/components/PassportScannerModal.tsx src/lib/passportApprovalGuard.ts
           if ! git diff --cached --quiet; then
-            git commit -m 'fix: require verified passport data before candidate approval'
+            git commit -m 'fix: remove remaining passport name placeholder'
             git push origin HEAD:main
           fi
