@@ -27,6 +27,7 @@ import {
 } from "../lib/mrzScanner";
 import { postJsonToApi } from "../lib/apiConfig";
 import { compressImage } from "../lib/imageUtils";
+import { canApprovePassportData } from "../lib/passportApprovalGuard";
 
 interface PassportScannerModalProps {
   isOpen: boolean;
@@ -391,6 +392,20 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
     const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";
     const gndr = visualGender || (analysis?.mrz?.gender === "female" ? "female" : "male");
     const cntry = visualNationality || analysis?.mrz?.nationalityName || "المملكة العربية السعودية";
+
+    const approval = canApprovePassportData({
+      hasVerifiedMrz: Boolean(analysis?.mrz?.checksums?.allValid),
+      passportNumber: passNo,
+      firstName: fName,
+      lastName: lName,
+      birthDate: bDate,
+      expiryDate: passExp
+    });
+
+    if (!approval.allowed) {
+      setErrorMessage(approval.reason || "لا يمكن اعتماد بيانات الجواز قبل اكتمال الفحص والمطابقة.");
+      return;
+    }
 
     onApplyData({
       firstName: fName,
