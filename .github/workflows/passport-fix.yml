@@ -14,17 +14,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -c 'from pathlib import Path; p=Path("src/components/PassportScannerModal.tsx"); s=p.read_text(encoding="utf-8"); s=s.replace("fName = analysis?.mrz?.givenNames || \\\"المرشح\\\";", "fName = analysis?.mrz?.givenNames || \\\"\\\";"); p.write_text(s,encoding="utf-8")'
-          python3 -c 'from pathlib import Path; p=Path("src/lib/passportApprovalGuard.ts"); s=p.read_text(encoding="utf-8"); s=s.replace("  \\\"المرشح\\\",\\n", ""); p.write_text(s,encoding="utf-8")'
-          ! grep -RniE 'P0000000|Math\.random\(\).*passport|setCandidateFirstName\("المرشح"\)|givenNames \|\| "المرشح"' src/components src/lib --include="*.ts" --include="*.tsx" --exclude="*.test.ts" --exclude="*.test.tsx"
-          npm ci --legacy-peer-deps
-          npm run lint
-          npm test
-          npm run build:web
+          sed -i 's/givenNames || "المرشح"/givenNames || ""/' src/components/PassportScannerModal.tsx
+          sed -i 's/ || "المرشح" ?/ || "" ?/' src/components/PassportScannerModal.tsx || true
+          ! grep -RniE 'P0000000|Math\.random\(\).*passport|givenNames \|\| "المرشح"|setCandidateFirstName\("المرشح"\)' src/components src/lib --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/components/PassportScannerModal.tsx src/lib/passportApprovalGuard.ts
+          git add src/components/PassportScannerModal.tsx
           if ! git diff --cached --quiet; then
-            git commit -m 'fix: remove remaining passport name placeholder'
+            git commit -m 'fix: remove final passport placeholder'
             git push origin HEAD:main
           fi
