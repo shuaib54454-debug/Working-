@@ -1,0 +1,46 @@
+name: Fix Passport Data Flow
+
+on:
+  push:
+    branches:
+      - fix/passport-data-flow
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fix API response mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/components/PassportScannerModal.tsx")
+          text = path.read_text(encoding="utf-8")
+          old = '''      if (res.success && res.data?.data) {
+        extractedData = res.data.data;
+      } else if (res.error) {'''
+          new = '''      if (res.success && res.data) {
+        // postJsonToApi returns the decoded JSON envelope in `data`, so accept
+        // both the current `{ success, data: {...} }` API shape and a direct
+        // extracted payload. This keeps browser and Android flows consistent.
+        const apiPayload = res.data as typeof extractedData & { data?: typeof extractedData };
+        extractedData = apiPayload?.data ?? apiPayload;
+      } else if (res.error) {'''
+          if old not in text:
+              raise SystemExit("Expected passport response mapping was not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/PassportScannerModal.tsx
+          git commit -m "fix: correctly unwrap passport scan API response"
+          git push origin HEAD:fix/passport-data-flow
