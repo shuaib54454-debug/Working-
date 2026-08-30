@@ -43,6 +43,7 @@ jobs:
           from pathlib import Path
           path = Path("src/components/PassportScannerModal.tsx")
           text = path.read_text(encoding="utf-8")
+          changed = False
           replacements = {
               'setCandidateFirstName("المرشح");': 'setCandidateFirstName("");',
               'setVisualPassportNo("P" + Math.floor(10000000 + Math.random() * 90000000));': 'setVisualPassportNo("");',
@@ -54,21 +55,53 @@ jobs:
               'firstName: fName || "المرشح",': 'firstName: fName,',
               'lastName: lName || "المرشح",': 'lastName: lName,'
           }
-          changed = False
           for old, new in replacements.items():
               if old in text:
                   text = text.replace(old, new)
                   changed = True
+
+          import_anchor = 'import { compressImage } from "../lib/imageUtils";'
+          import_line = 'import { canApprovePassportData } from "../lib/passportApprovalGuard";'
+          if import_anchor in text and import_line not in text:
+              text = text.replace(import_anchor, import_anchor + "\n" + import_line, 1)
+              changed = True
+
+          guard_anchor = '''    const gndr = visualGender || (analysis?.mrz?.gender === "female" ? "female" : "male");
+    const cntry = visualNationality || analysis?.mrz?.nationalityName || "المملكة العربية السعودية";
+
+    onApplyData({'''
+          guard_block = '''    const gndr = visualGender || (analysis?.mrz?.gender === "female" ? "female" : "male");
+    const cntry = visualNationality || analysis?.mrz?.nationalityName || "المملكة العربية السعودية";
+
+    const approval = canApprovePassportData({
+      hasVerifiedMrz: Boolean(analysis?.mrz?.checksums?.allValid),
+      passportNumber: passNo,
+      firstName: fName,
+      lastName: lName,
+      birthDate: bDate,
+      expiryDate: passExp
+    });
+
+    if (!approval.allowed) {
+      setErrorMessage(approval.reason || "لا يمكن اعتماد بيانات الجواز قبل اكتمال الفحص والمطابقة.");
+      return;
+    }
+
+    onApplyData({'''
+          if guard_anchor in text and 'const approval = canApprovePassportData({' not in text:
+              text = text.replace(guard_anchor, guard_block, 1)
+              changed = True
+
           path.write_text(text, encoding="utf-8")
-          print("✅ Unsafe passport fallback values removed from PassportScannerModal.tsx" if changed else "✅ Passport fallback hardening already applied")
+          print("✅ Passport approval hardening applied" if changed else "✅ Passport approval hardening already applied")
           PY
           if ! git diff --quiet -- src/components/PassportScannerModal.tsx; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add src/components/PassportScannerModal.tsx
-            git commit -m "security: remove unsafe passport placeholder fallbacks"
+            git commit -m "fix: require verified passport data before candidate approval"
             git push origin HEAD:security/p0-hardening
-            echo "✅ Passport hardening committed to security/p0-hardening."
+            echo "✅ Passport approval hardening committed to security/p0-hardening."
           fi
 
       - name: 🟢 Setup Node.js 22.x (LTS)
