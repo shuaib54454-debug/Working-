@@ -77,6 +77,13 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
     country: string;
     job?: string;
   }) => {
+    const hasCompletePassportData = [data.firstName, data.lastName, data.passportNumber, data.passportExpiryDate, data.dateOfBirth].every((value) => Boolean(value?.trim()));
+    if (!hasCompletePassportData) {
+      setIsScannedWithMRZ(false);
+      alert("لم يتم اعتماد بيانات الجواز: البيانات المستخرجة غير مكتملة. يرجى إعادة الفحص أو إدخال البيانات يدويًا.");
+      return;
+    }
+
     if (data.firstName) setFirstName(data.firstName);
     if (data.lastName) {
       setLastName(data.lastName === "-" ? data.firstName : data.lastName);
