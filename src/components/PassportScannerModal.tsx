@@ -379,7 +379,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({
         lName = visualName;
       }
     } else if (!fName && analysis?.mrz) {
-      fName = analysis.mrz.givenNames || "المرشح";
+      fName = analysis.mrz.givenNames || "";
       lName = analysis.mrz.surname && analysis.mrz.surname !== "المرشح" ? analysis.mrz.surname : fName;
     }
 
