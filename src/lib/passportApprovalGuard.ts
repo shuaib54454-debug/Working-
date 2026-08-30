@@ -18,14 +18,14 @@ const PLACEHOLDERS = new Set([
   "candidate",
   "unknown",
   "undefined",
-  "null",
-  "p0000000"
+  "null"
 ]);
 
 const ISO_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 const isPlaceholder = (value: string) => {
   const normalized = value.trim().toLowerCase();
+  if (/^p0{7}$/i.test(normalized)) return true;
   return !normalized || PLACEHOLDERS.has(normalized);
 };
 
