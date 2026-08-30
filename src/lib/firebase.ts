@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import {
+  initializeFirestore,
   getFirestore,
   collection,
   doc,
@@ -40,9 +41,26 @@ setPersistence(auth, browserLocalPersistence).catch((err) => {
   console.warn("Auth persistence error:", err);
 });
 
-export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)"
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+const databaseId =
+  firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)"
+    ? firebaseConfig.firestoreDatabaseId
+    : undefined;
+
+let firestoreInstance;
+try {
+  firestoreInstance = initializeFirestore(
+    app,
+    {
+      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true
+    },
+    databaseId
+  );
+} catch {
+  firestoreInstance = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+}
+
+export const db = firestoreInstance;
 
 export const storage = getStorage(app);
 
@@ -127,8 +145,13 @@ export async function testFirebaseConnection(): Promise<boolean> {
     console.log("Firebase Firestore connected successfully");
     return true;
   } catch (error: any) {
-    if (error instanceof Error && error.message.includes("the client is offline")) {
-      console.warn("Firebase client is currently offline");
+    if (
+      error instanceof Error &&
+      (error.message.includes("the client is offline") ||
+       error.message.includes("unavailable") ||
+       error.message.includes("offline"))
+    ) {
+      console.warn("Firebase client is currently in offline mode / reconnecting");
     } else {
       console.log("Firebase Firestore initialized:", error?.message || "ready");
     }
