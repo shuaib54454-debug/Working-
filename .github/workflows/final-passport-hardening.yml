@@ -24,31 +24,56 @@ jobs:
           scanner = Path('src/components/PassportScannerModal.tsx')
           text = scanner.read_text(encoding='utf-8')
 
-          replacements = {
-              'import { compressImage } from "../lib/imageUtils";': 'import { compressImage } from "../lib/imageUtils";\nimport { canApprovePassportData } from "../lib/passportApprovalGuard";',
-              'fName = analysis?.mrz?.givenNames || "المرشح";': 'fName = analysis?.mrz?.givenNames || "";',
-              'lName = analysis?.mrz?.surname && analysis?.mrz?.surname !== "المرشح" ? analysis?.mrz?.surname : fName;': 'lName = analysis?.mrz?.surname && analysis?.mrz?.surname !== "المرشح" ? analysis?.mrz?.surname : fName;',
-              '    onApplyData({\n      firstName: fName,': '    const approval = canApprovePassportData({\n      hasVerifiedMrz: Boolean(analysis?.mrz?.checksums?.allValid),\n      passportNumber: passNo,\n      firstName: fName,\n      lastName: lName,\n      birthDate: bDate,\n      expiryDate: passExp\n    });\n\n    if (!approval.allowed) {\n      setErrorMessage(approval.reason || "لا يمكن اعتماد بيانات الجواز قبل اكتمال الفحص والمطابقة.");\n      return;\n    }\n\n    onApplyData({\n      firstName: fName,'
-          }
+          import_line = 'import { canApprovePassportData } from "../lib/passportApprovalGuard";'
+          if import_line not in text:
+              anchor = 'import { compressImage } from "../lib/imageUtils";'
+              if anchor not in text:
+                  raise SystemExit('Missing scanner import anchor')
+              text = text.replace(anchor, anchor + '\n' + import_line, 1)
 
+          replacements = {
+              'fName = analysis?.mrz?.givenNames || "المرشح";': 'fName = analysis?.mrz?.givenNames || "";',
+              'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "P0000000";': 'const passNo = visualPassportNo.trim() || analysis?.mrz?.passportNumber || "";',
+              'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "2030-01-01";': 'const passExp = visualExpiryDate || analysis?.mrz?.expiryDateFormatted || "";',
+              'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "1995-01-01";': 'const bDate = visualBirthDate || analysis?.mrz?.birthDateFormatted || "";',
+              'firstName: fName || "المرشح",': 'firstName: fName,',
+              'lastName: lName || "المرشح",': 'lastName: lName,'
+          }
           for old, new in replacements.items():
-              if old not in text:
-                  raise SystemExit(f'Missing expected source anchor: {old[:80]}')
-              text = text.replace(old, new, 1)
+              text = text.replace(old, new)
+
+          approval_anchor = '    onApplyData({\n      firstName: fName,'
+          approval_block = '''    const approval = canApprovePassportData({
+      hasVerifiedMrz: Boolean(analysis?.mrz?.checksums?.allValid),
+      passportNumber: passNo,
+      firstName: fName,
+      lastName: lName,
+      birthDate: bDate,
+      expiryDate: passExp
+    });
+
+    if (!approval.allowed) {
+      setErrorMessage(approval.reason || "لا يمكن اعتماد بيانات الجواز قبل اكتمال الفحص والمطابقة.");
+      return;
+    }
+
+    onApplyData({
+      firstName: fName,'''
+          if 'const approval = canApprovePassportData({' not in text:
+              if approval_anchor not in text:
+                  raise SystemExit('Missing scanner approval anchor')
+              text = text.replace(approval_anchor, approval_block, 1)
 
           scanner.write_text(text, encoding='utf-8')
 
           guard = Path('src/lib/passportApprovalGuard.ts')
           g = guard.read_text(encoding='utf-8')
-          old = '  "p0000000"\n'
-          if old not in g:
-              raise SystemExit('Missing passport placeholder anchor in guard')
-          g = g.replace(old, '', 1)
+          g = g.replace('  "p0000000"\n', '')
           marker = 'const isPlaceholder = (value: string) => {'
-          replacement = 'const isPlaceholder = (value: string) => {\n  if (/^p0{7}$/i.test(value.trim())) return true;'
           if marker not in g:
               raise SystemExit('Missing placeholder function anchor')
-          g = g.replace(marker, replacement, 1)
+          if 'if (/^p0{7}$/i.test(value.trim())) return true;' not in g:
+              g = g.replace(marker, marker + '\n  if (/^p0{7}$/i.test(value.trim())) return true;', 1)
           guard.write_text(g, encoding='utf-8')
           PY
 
@@ -57,7 +82,7 @@ jobs:
             exit 1
           fi
 
-          npm ci
+          npm ci --legacy-peer-deps
           npm run lint
           npm test
           npm run build:web
