@@ -19,6 +19,7 @@ import {
 import { Candidate, AgencySettings, StageId } from "../types";
 import { getTodayDateString } from "../data/initialData";
 import { PassportScannerModal } from "./PassportScannerModal";
+import { findCandidateDuplicates } from "../lib/candidateDuplicate";
 
 interface AddCandidateWizardProps {
   isOpen: boolean;
@@ -131,6 +132,35 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
         method: initialPaymentMethod,
         note: initialPaymentNote
       };
+    }
+
+    // Prevent duplicate registrations using locally cached candidates.
+    // Firestore synchronization keeps this cache populated across sessions.
+    try {
+      const stored = localStorage.getItem("shuayb_candidates");
+      const existing = stored ? JSON.parse(stored) : [];
+      const duplicateCheck = findCandidateDuplicates(
+        Array.isArray(existing) ? existing : [],
+        candidateData as Pick<Candidate, "firstName" | "lastName" | "dateOfBirth" | "passportNumber">
+      );
+
+      const confirmed = duplicateCheck.confirmed[0];
+      if (confirmed) {
+        alert(
+          `⚠️ هذا المرشح مسجل مسبقًا.\n\nالاسم: ${confirmed.candidate.firstName} ${confirmed.candidate.lastName}\nرقم الجواز: ${confirmed.candidate.passportNumber || "غير مسجل"}\nالرقم الداخلي: ${confirmed.candidate.id}\n\nلن يتم إنشاء سجل مكرر.`
+        );
+        return;
+      }
+
+      const possible = duplicateCheck.possible[0];
+      if (possible) {
+        const continueRegistration = window.confirm(
+          `⚠️ يوجد مرشح يحتمل أن يكون نفس الشخص.\n\nالاسم: ${possible.candidate.firstName} ${possible.candidate.lastName}\nتاريخ الميلاد: ${possible.candidate.dateOfBirth || "غير مسجل"}\nالرقم الداخلي: ${possible.candidate.id}\n\nهل تريد الاستمرار وتسجيله كمرشح جديد؟`
+        );
+        if (!continueRegistration) return;
+      }
+    } catch (duplicateError) {
+      console.warn("Candidate duplicate check failed; continuing registration:", duplicateError);
     }
 
     onAdd(candidateData, initialPayment);

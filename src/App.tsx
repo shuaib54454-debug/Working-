@@ -52,6 +52,7 @@ import {
   syncSettingsToCloud,
   autoMigrateExistingDataToOwner
 } from "./lib/firebase";
+import { findCandidateDuplicates } from "./lib/candidateDuplicate";
 import { Capacitor } from "@capacitor/core";
 import { App as CapApp } from "@capacitor/app";
 import { StatusBar, Style } from "@capacitor/status-bar";
@@ -259,6 +260,35 @@ export default function App() {
     data: Partial<Candidate>,
     initialPayment?: { amount: number; method: any; note: string }
   ) => {
+    const duplicateCheck = findCandidateDuplicates(candidates, {
+      firstName: data.firstName || "",
+      lastName: data.lastName || "",
+      dateOfBirth: data.dateOfBirth || "",
+      passportNumber: data.passportNumber || ""
+    });
+
+    const confirmed = duplicateCheck.confirmed[0];
+    if (confirmed) {
+      alert(
+        `⚠️ هذا المرشح مسجل مسبقًا.\n\nالاسم: ${confirmed.candidate.firstName} ${confirmed.candidate.lastName}\nرقم الجواز: ${confirmed.candidate.passportNumber || "غير مسجل"}\nالرقم الداخلي: ${confirmed.candidate.id}\n\nلن يتم إنشاء سجل مكرر.`
+      );
+      setActiveCandidateId(confirmed.candidate.id);
+      setCurrentView("profile");
+      return;
+    }
+
+    const possible = duplicateCheck.possible[0];
+    if (possible) {
+      const continueRegistration = window.confirm(
+        `⚠️ يوجد مرشح يحتمل أن يكون نفس الشخص.\n\nالاسم: ${possible.candidate.firstName} ${possible.candidate.lastName}\nتاريخ الميلاد: ${possible.candidate.dateOfBirth || "غير مسجل"}\nالرقم الداخلي: ${possible.candidate.id}\n\nهل تريد الاستمرار وتسجيله كمرشح جديد؟`
+      );
+      if (!continueRegistration) {
+        setActiveCandidateId(possible.candidate.id);
+        setCurrentView("profile");
+        return;
+      }
+    }
+
     const id = `CAND-${String(settings.nextId).padStart(4, "0")}`;
     const payments: PaymentRecord[] = [];
 
