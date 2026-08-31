@@ -1,0 +1,33 @@
+name: Apply Candidate Duplicate Feature
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: "!contains(github.event.head_commit.message, 'feat: integrate candidate duplicate guard')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply duplicate guard integration
+        run: python3 scripts/apply-duplicate-feature.py
+
+      - name: Verify
+        run: |
+          npm ci --legacy-peer-deps
+          npm test
+          npm run lint
+
+      - name: Commit feature integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/AddCandidateWizard.tsx src/App.tsx .github/workflows/apply-duplicate-feature.yml scripts/apply-duplicate-feature.py
+          git rm -f .github/workflows/apply-duplicate-feature.yml scripts/apply-duplicate-feature.py
+          git commit -m "feat: integrate candidate duplicate guard"
+          git push
