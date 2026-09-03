@@ -68,8 +68,11 @@ export interface Candidate {
   photoStoragePath?: string; // Firebase Cloud Storage path: workers/{id}/photo/...
   photoUrl?: string;
   contractStoragePath?: string;
+  contractUrl?: string;
   visaStoragePath?: string;
+  visaUrl?: string;
   medicalStoragePath?: string;
+  medicalUrl?: string;
   cocStoragePath?: string; // Firebase Cloud Storage path: workers/{id}/coc/...
   cocImageUrl?: string;
   stage: StageId;

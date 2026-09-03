@@ -309,8 +309,12 @@ export const CandidateCardMain: React.FC<CandidateCardProps> = ({
 
         {/* Name, Job & Avatar Row (Large Touch Area) */}
         <div className="flex items-start gap-3 mb-2.5">
-          <div className="w-12 h-12 rounded-2xl bg-stone-100 text-[#172a46] font-extrabold flex items-center justify-center text-base border border-stone-100 group-hover:bg-[#172a46] group-hover:text-white transition-colors shrink-0 shadow-2xs">
-            {candidate.firstName.charAt(0)}
+          <div className="w-12 h-12 rounded-2xl bg-stone-100 text-[#172a46] font-extrabold flex items-center justify-center text-base border border-stone-100 group-hover:bg-[#172a46] group-hover:text-white transition-colors shrink-0 shadow-2xs overflow-hidden">
+            {candidate.photoUrl ? (
+              <img src={candidate.photoUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              candidate.firstName.charAt(0)
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <h3 className="font-extrabold text-base text-[#172a46] group-hover:text-[#c9a84c] transition-colors truncate">

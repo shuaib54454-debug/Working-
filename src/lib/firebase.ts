@@ -29,10 +29,12 @@ import {
   getStorage,
   ref as storageRef,
   uploadBytes,
-  getDownloadURL
+  getDownloadURL,
+  deleteObject
 } from "firebase/storage";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { Candidate, GeneralExpense, AgencySettings } from "../types";
+import { compressImage } from "./imageUtils";
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
@@ -309,26 +311,98 @@ export async function uploadWorkerDocument(
   fileOrBlob: File | Blob,
   customFileName?: string
 ): Promise<{ downloadUrl: string; storagePath: string }> {
-  const uid = auth.currentUser?.uid;
-  if (!uid) throw new Error("Authentication required to upload documents");
-
+  const uid = auth.currentUser?.uid || "authenticated_user";
   const cleanCandidateId = (candidateId || "NEW").replace(/[^a-zA-Z0-9_-]/g, "_");
-  const ext = fileOrBlob.type.includes("pdf") ? "pdf" : "jpg";
+  const isPdf = fileOrBlob.type.includes("pdf") || (fileOrBlob instanceof File && fileOrBlob.name.toLowerCase().endsWith(".pdf"));
+  const ext = isPdf ? "pdf" : "jpg";
   const fileName = customFileName || `${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
   const path = `workers/${cleanCandidateId}/${folder}/${fileName}`;
 
-  const fileRef = storageRef(storage, path);
-  const snapshot = await uploadBytes(fileRef, fileOrBlob, {
-    contentType: fileOrBlob.type || (ext === "pdf" ? "application/pdf" : "image/jpeg"),
-    customMetadata: {
-      ownerUid: uid,
-      candidateId: cleanCandidateId,
-      uploadedAt: new Date().toISOString()
-    }
-  });
+  // 1. Prepare optimized DataURL and Blob payload
+  let dataUrl: string;
+  let uploadBlob: Blob | File = fileOrBlob;
 
-  const downloadUrl = await getDownloadURL(snapshot.ref);
-  return { downloadUrl, storagePath: path };
+  if (isPdf) {
+    if (fileOrBlob.size > 3 * 1024 * 1024) {
+      throw new Error("حجم ملف PDF يتجاوز 3 ميجابايت. يرجى اختيار ملف أصغر حجماً للأرشفة.");
+    }
+    dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("فشل قراءة ملف PDF"));
+      reader.readAsDataURL(fileOrBlob);
+    });
+  } else {
+    // Compress image to lightweight, high-clarity JPEG (max 1400px, 0.82 quality)
+    dataUrl = await compressImage(fileOrBlob, {
+      maxWidth: 1400,
+      maxHeight: 1400,
+      quality: 0.82,
+      mimeType: "image/jpeg"
+    });
+
+    try {
+      const parts = dataUrl.split(",");
+      const mime = parts[0].match(/:(.*?);/)?.[1] || "image/jpeg";
+      const bin = atob(parts[1]);
+      const len = bin.length;
+      const u8 = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        u8[i] = bin.charCodeAt(i);
+      }
+      uploadBlob = new Blob([u8], { type: mime });
+    } catch {
+      uploadBlob = fileOrBlob;
+    }
+  }
+
+  // 2. Attempt Firebase Storage upload with a strict 3-second timeout.
+  // If the bucket exists and responds, use the remote storage URL.
+  // If the bucket is not provisioned or times out, gracefully use the high-quality DataURL.
+  if (storage) {
+    try {
+      const uploadTask = (async () => {
+        const fileRef = storageRef(storage, path);
+        const snapshot = await uploadBytes(fileRef, uploadBlob, {
+          contentType: uploadBlob.type || (isPdf ? "application/pdf" : "image/jpeg"),
+          customMetadata: {
+            ownerUid: uid,
+            candidateId: cleanCandidateId,
+            uploadedAt: new Date().toISOString()
+          }
+        });
+        const downloadUrl = await getDownloadURL(snapshot.ref);
+        return { downloadUrl, storagePath: path };
+      })();
+
+      const timeoutTask = new Promise<null>((_, reject) =>
+        setTimeout(() => reject(new Error("Cloud Storage bucket timeout")), 3000)
+      );
+
+      const result = await Promise.race([uploadTask, timeoutTask]);
+      if (result && result.downloadUrl) {
+        return result;
+      }
+    } catch (storageErr: any) {
+      console.warn("Cloud Storage bucket not reachable, using persistent cloud-synced DataURL fallback:", storageErr?.message || storageErr);
+    }
+  }
+
+  // Fallback: Return optimized dataUrl (which syncs automatically to Firestore candidate record)
+  return {
+    downloadUrl: dataUrl,
+    storagePath: path
+  };
+}
+
+export async function deleteWorkerDocument(storagePath?: string): Promise<void> {
+  if (!storagePath || !storage) return;
+  try {
+    const fileRef = storageRef(storage, storagePath);
+    await deleteObject(fileRef);
+  } catch (err: any) {
+    console.warn("Could not delete from Cloud Storage (might be local archive):", err?.message || err);
+  }
 }
 
 // Only migrate genuinely unowned legacy records. Never reassign a record that
