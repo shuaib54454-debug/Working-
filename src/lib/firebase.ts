@@ -310,13 +310,16 @@ export async function uploadWorkerDocument(
   folder: WorkerStorageFolder,
   fileOrBlob: File | Blob,
   customFileName?: string
-): Promise<{ downloadUrl: string; storagePath: string }> {
+): Promise<{ downloadUrl: string; storagePath: string; docId: string; fileName: string; sizeBytes: number; isPdf: boolean }> {
   const uid = auth.currentUser?.uid || "authenticated_user";
   const cleanCandidateId = (candidateId || "NEW").replace(/[^a-zA-Z0-9_-]/g, "_");
   const isPdf = fileOrBlob.type.includes("pdf") || (fileOrBlob instanceof File && fileOrBlob.name.toLowerCase().endsWith(".pdf"));
   const ext = isPdf ? "pdf" : "jpg";
-  const fileName = customFileName || `${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+  const uniqueSuffix = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase();
+  const docId = `DOC-${cleanCandidateId}-${folder.toUpperCase()}-${uniqueSuffix}`;
+  const fileName = customFileName || `${Date.now()}_${uniqueSuffix}.${ext}`;
   const path = `workers/${cleanCandidateId}/${folder}/${fileName}`;
+  const sizeBytes = fileOrBlob.size;
 
   // 1. Prepare optimized DataURL and Blob payload
   let dataUrl: string;
@@ -368,11 +371,13 @@ export async function uploadWorkerDocument(
           customMetadata: {
             ownerUid: uid,
             candidateId: cleanCandidateId,
+            docId: docId,
+            folder: folder,
             uploadedAt: new Date().toISOString()
           }
         });
         const downloadUrl = await getDownloadURL(snapshot.ref);
-        return { downloadUrl, storagePath: path };
+        return { downloadUrl, storagePath: path, docId, fileName, sizeBytes, isPdf };
       })();
 
       const timeoutTask = new Promise<null>((_, reject) =>
@@ -391,7 +396,11 @@ export async function uploadWorkerDocument(
   // Fallback: Return optimized dataUrl (which syncs automatically to Firestore candidate record)
   return {
     downloadUrl: dataUrl,
-    storagePath: path
+    storagePath: path,
+    docId,
+    fileName,
+    sizeBytes,
+    isPdf
   };
 }
 

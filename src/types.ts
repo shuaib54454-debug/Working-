@@ -47,6 +47,26 @@ export interface GeneralExpense {
   note?: string;
 }
 
+export interface WorkerDocumentRecord {
+  id: string; // e.g. "DOC-CAND-0001-PASSPORT-K8A2"
+  folder: "passport" | "photo" | "contract" | "visa" | "medical" | "coc" | "documents";
+  title: string;
+  url: string;
+  storagePath?: string;
+  fileName?: string;
+  uploadedAt: string;
+  fileType?: "pdf" | "image";
+  sizeBytes?: number;
+}
+
+export interface CandidateNoteEntry {
+  id: string;
+  date: string;
+  author?: string;
+  text: string;
+  referencedDocId?: string;
+}
+
 export interface Candidate {
   id: string; // e.g. CAND-0001
   ownerUid?: string;
@@ -65,16 +85,23 @@ export interface Candidate {
   passportExpiryDate?: string;
   passportStoragePath?: string; // Firebase Cloud Storage path: workers/{id}/passport/...
   passportImageUrl?: string; // Firebase Cloud Storage download URL
+  passportDocId?: string; // Unique Document ID
   photoStoragePath?: string; // Firebase Cloud Storage path: workers/{id}/photo/...
   photoUrl?: string;
+  photoDocId?: string;
   contractStoragePath?: string;
   contractUrl?: string;
+  contractDocId?: string;
   visaStoragePath?: string;
   visaUrl?: string;
+  visaDocId?: string;
   medicalStoragePath?: string;
   medicalUrl?: string;
+  medicalDocId?: string;
   cocStoragePath?: string; // Firebase Cloud Storage path: workers/{id}/coc/...
   cocImageUrl?: string;
+  cocDocId?: string;
+  uploadedDocuments?: WorkerDocumentRecord[];
   stage: StageId;
   medicalStatus?: string; // "لائق طبياً", "بانتظار النتيجة", "غير لائق", "لم يفحص"
   medicalDate?: string;
@@ -94,6 +121,7 @@ export interface Candidate {
   registrationDate: string;
   archived: boolean;
   notes?: string;
+  noteEntries?: CandidateNoteEntry[];
   agentName?: string; // اسم الوسيط / المندوب
   sponsorName?: string; // اسم الكفيل / صاحب العمل
   contractDurationYears?: number;

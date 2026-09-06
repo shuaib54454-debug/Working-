@@ -39,14 +39,19 @@ import {
   Image as ImageIcon,
   Download,
   Loader2,
-  Eye
+  Eye,
+  Copy,
+  Check,
+  FilePlus,
+  Sparkles
 } from "lucide-react";
-import { Candidate, AgencySettings, StageId, PaymentRecord, CandidateExpense } from "../types";
+import { Candidate, AgencySettings, StageId, PaymentRecord, CandidateExpense, WorkerDocumentRecord, CandidateNoteEntry } from "../types";
 import { STAGES, formatMoney, getTodayDateString, calculateCandidateFinance } from "../data/initialData";
 import { exportElementToPDF } from "../lib/pdfUtils";
 import { ReceiptData } from "./ReceiptModal";
 import { PassportScannerModal } from "./PassportScannerModal";
 import { uploadWorkerDocument, deleteWorkerDocument, WorkerStorageFolder } from "../lib/firebase";
+import { CandidateDocumentsAndNotes } from "./CandidateDocumentsAndNotes";
 
 interface CandidateProfileProps {
   candidate: Candidate;
@@ -95,12 +100,32 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
+  const [copiedDocId, setCopiedDocId] = useState<string | null>(null);
+
   const [activePreviewDoc, setActivePreviewDoc] = useState<{
+    id?: string;
     title: string;
     url: string;
     isPdf: boolean;
     folder: WorkerStorageFolder;
+    fileName?: string;
   } | null>(null);
+
+  const handleCopyDocId = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(id).then(() => {
+        setCopiedDocId(id);
+        setTimeout(() => setCopiedDocId(null), 2500);
+      }).catch(() => {
+        setCopiedDocId(id);
+        setTimeout(() => setCopiedDocId(null), 2500);
+      });
+    } else {
+      setCopiedDocId(id);
+      setTimeout(() => setCopiedDocId(null), 2500);
+    }
+  };
 
   const handleExportProfilePDF = async () => {
     setIsExportingPDF(true);
@@ -118,37 +143,76 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
     }
   };
 
-  const handleFileUpload = async (folder: WorkerStorageFolder, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (
+    folder: WorkerStorageFolder,
+    e: React.ChangeEvent<HTMLInputElement>,
+    customTitle?: string
+  ) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingFolder(folder);
     setUploadError(null);
     setUploadSuccess(null);
     try {
-      const { downloadUrl, storagePath } = await uploadWorkerDocument(candidate.id, folder, file);
+      const { downloadUrl, storagePath, docId, fileName, sizeBytes, isPdf } = await uploadWorkerDocument(candidate.id, folder, file);
       const updates: Partial<Candidate> = {};
       if (folder === "passport") {
         updates.passportImageUrl = downloadUrl;
         updates.passportStoragePath = storagePath;
+        updates.passportDocId = docId;
       } else if (folder === "photo") {
         updates.photoUrl = downloadUrl;
         updates.photoStoragePath = storagePath;
+        updates.photoDocId = docId;
       } else if (folder === "contract") {
         updates.contractUrl = downloadUrl;
         updates.contractStoragePath = storagePath;
+        updates.contractDocId = docId;
       } else if (folder === "visa") {
         updates.visaUrl = downloadUrl;
         updates.visaStoragePath = storagePath;
+        updates.visaDocId = docId;
       } else if (folder === "medical") {
         updates.medicalUrl = downloadUrl;
         updates.medicalStoragePath = storagePath;
+        updates.medicalDocId = docId;
       } else if (folder === "coc") {
         updates.cocImageUrl = downloadUrl;
         updates.cocStoragePath = storagePath;
+        updates.cocDocId = docId;
       }
+
+      const titleMap: Record<string, string> = {
+        passport: "صورة جواز السفر",
+        photo: "الصورة الشخصية",
+        contract: "عقد العمل والاتفاقية",
+        visa: "تأشيرة الدخول (الفيزا)",
+        medical: "التقرير الطبي",
+        coc: "شهادة الكفاءة المهنية (COC)",
+        documents: customTitle || "وثيقة إضافية"
+      };
+
+      const newDocRecord: WorkerDocumentRecord = {
+        id: docId,
+        folder,
+        title: titleMap[folder] || customTitle || "وثيقة",
+        url: downloadUrl,
+        storagePath,
+        fileName,
+        uploadedAt: new Date().toISOString(),
+        fileType: isPdf ? "pdf" : "image",
+        sizeBytes
+      };
+
+      const currentDocs = candidate.uploadedDocuments || [];
+      const updatedDocs = folder === "documents"
+        ? [newDocRecord, ...currentDocs]
+        : [newDocRecord, ...currentDocs.filter(d => d.folder !== folder)];
+
+      updates.uploadedDocuments = updatedDocs;
       onUpdate(candidate.id, updates);
-      setUploadSuccess("تم حفظ وأرشفة الوثيقة بنجاح في السحابة");
-      setTimeout(() => setUploadSuccess(null), 3500);
+      setUploadSuccess(`تم رفع وأرشفة الوثيقة بنجاح بالمعرّف: ${docId}`);
+      setTimeout(() => setUploadSuccess(null), 4000);
     } catch (err: any) {
       console.error("Upload error:", err);
       setUploadError(err?.message || "فشل حفظ الملف في الأرشيف");
@@ -158,10 +222,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
     }
   };
 
-  const handleDeleteDocument = async (folder: WorkerStorageFolder) => {
-    if (!window.confirm("هل أنت متأكد من حذف هذه الوثيقة من أرشيف المرشح؟")) {
-      return;
-    }
+  const handleDeleteDocument = async (folder: WorkerStorageFolder, targetDocId?: string) => {
     try {
       const updates: Partial<Candidate> = {};
       let pathToDelete: string | undefined;
@@ -170,26 +231,42 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
         pathToDelete = candidate.passportStoragePath;
         updates.passportImageUrl = "";
         updates.passportStoragePath = "";
+        updates.passportDocId = "";
       } else if (folder === "photo") {
         pathToDelete = candidate.photoStoragePath;
         updates.photoUrl = "";
         updates.photoStoragePath = "";
+        updates.photoDocId = "";
       } else if (folder === "contract") {
         pathToDelete = candidate.contractStoragePath;
         updates.contractUrl = "";
         updates.contractStoragePath = "";
+        updates.contractDocId = "";
       } else if (folder === "visa") {
         pathToDelete = candidate.visaStoragePath;
         updates.visaUrl = "";
         updates.visaStoragePath = "";
+        updates.visaDocId = "";
       } else if (folder === "medical") {
         pathToDelete = candidate.medicalStoragePath;
         updates.medicalUrl = "";
         updates.medicalStoragePath = "";
+        updates.medicalDocId = "";
       } else if (folder === "coc") {
         pathToDelete = candidate.cocStoragePath;
         updates.cocImageUrl = "";
         updates.cocStoragePath = "";
+        updates.cocDocId = "";
+      }
+
+      if (candidate.uploadedDocuments) {
+        if (targetDocId) {
+          const docToDelete = candidate.uploadedDocuments.find(d => d.id === targetDocId);
+          if (docToDelete?.storagePath) pathToDelete = docToDelete.storagePath;
+          updates.uploadedDocuments = candidate.uploadedDocuments.filter(d => d.id !== targetDocId);
+        } else {
+          updates.uploadedDocuments = candidate.uploadedDocuments.filter(d => d.folder !== folder);
+        }
       }
 
       await deleteWorkerDocument(pathToDelete);
@@ -1097,489 +1174,18 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
           TAB 4: DOCS & NOTES (الملاحظات والوثائق والسحابة)
       ========================================================================== */}
       {activeTab === "DOCS" && (
-        <div className="space-y-5 animate-in fade-in">
-          {/* Cloud Storage Documents Section */}
-          <div className="bg-white p-6 rounded-3xl border border-stone-100 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-black text-sm text-[#172a46] flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-[#c9a84c]" />
-                <span>أرشيف وثائق المرشح (Firebase Cloud Storage)</span>
-              </h3>
-              <span className="text-[11px] font-bold text-stone-400">
-                workers/{candidate.id}/
-              </span>
-            </div>
-
-            {uploadError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl text-xs font-bold flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{uploadError}</span>
-              </div>
-            )}
-
-            {uploadSuccess && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>{uploadSuccess}</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
-              {/* 1. Passport Document */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col justify-between gap-3 shadow-2xs hover:border-[#c9a84c]/40 transition-colors">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-[#c9a84c]" />
-                      <span className="text-xs font-black text-stone-800">صورة جواز السفر</span>
-                    </div>
-                    {candidate.passportImageUrl ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        مرفوع ومحفوظ
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-stone-200 text-stone-600">
-                        غير متوفر
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-stone-500">وثيقة السفر الرسمية لبيانات المرشح وتأكيد الهوية.</p>
-                </div>
-
-                <div className="pt-2 border-t border-stone-200/80 flex items-center justify-between gap-2">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-stone-300 hover:border-[#172a46] rounded-xl text-xs font-bold text-stone-700 cursor-pointer transition-colors shadow-2xs">
-                    {uploadingFolder === "passport" ? (
-                      <Loader2 className="w-3.5 h-3.5 text-[#c9a84c] animate-spin" />
-                    ) : (
-                      <Upload className="w-3.5 h-3.5 text-[#c9a84c]" />
-                    )}
-                    <span>{uploadingFolder === "passport" ? "جاري الحفظ..." : candidate.passportImageUrl ? "استبدال" : "رفع الجواز"}</span>
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      disabled={uploadingFolder === "passport"}
-                      onChange={e => handleFileUpload("passport", e)}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {candidate.passportImageUrl && (
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setActivePreviewDoc({
-                            title: "صورة جواز السفر",
-                            url: candidate.passportImageUrl!,
-                            isPdf: candidate.passportImageUrl!.startsWith("data:application/pdf") || candidate.passportImageUrl!.includes(".pdf"),
-                            folder: "passport"
-                          })
-                        }
-                        className="px-2.5 py-1.5 bg-[#172a46] text-white hover:bg-[#203a60] rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
-                        title="معاينة الوثيقة"
-                      >
-                        <Eye className="w-3.5 h-3.5 text-[#c9a84c]" />
-                        <span>معاينة</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDocument("passport")}
-                        className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors"
-                        title="حذف الوثيقة"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 2. Candidate Photo */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col justify-between gap-3 shadow-2xs hover:border-[#c9a84c]/40 transition-colors">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <ImageIcon className="w-4 h-4 text-[#c9a84c]" />
-                      <span className="text-xs font-black text-stone-800">الصورة الشخصية</span>
-                    </div>
-                    {candidate.photoUrl ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        مرفوع ومحفوظ
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-stone-200 text-stone-600">
-                        غير متوفر
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-stone-500">صورة حديثة بخلفية بيضاء للاستخدام في السيرة الذاتية والمعاملات.</p>
-                </div>
-
-                <div className="pt-2 border-t border-stone-200/80 flex items-center justify-between gap-2">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-stone-300 hover:border-[#172a46] rounded-xl text-xs font-bold text-stone-700 cursor-pointer transition-colors shadow-2xs">
-                    {uploadingFolder === "photo" ? (
-                      <Loader2 className="w-3.5 h-3.5 text-[#c9a84c] animate-spin" />
-                    ) : (
-                      <Upload className="w-3.5 h-3.5 text-[#c9a84c]" />
-                    )}
-                    <span>{uploadingFolder === "photo" ? "جاري الحفظ..." : candidate.photoUrl ? "استبدال" : "رفع الصورة"}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      disabled={uploadingFolder === "photo"}
-                      onChange={e => handleFileUpload("photo", e)}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {candidate.photoUrl && (
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setActivePreviewDoc({
-                            title: "الصورة الشخصية",
-                            url: candidate.photoUrl!,
-                            isPdf: false,
-                            folder: "photo"
-                          })
-                        }
-                        className="px-2.5 py-1.5 bg-[#172a46] text-white hover:bg-[#203a60] rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
-                        title="معاينة الصورة"
-                      >
-                        <Eye className="w-3.5 h-3.5 text-[#c9a84c]" />
-                        <span>معاينة</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDocument("photo")}
-                        className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors"
-                        title="حذف الصورة"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 3. Contract Document */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col justify-between gap-3 shadow-2xs hover:border-[#c9a84c]/40 transition-colors">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <FileCheck className="w-4 h-4 text-[#c9a84c]" />
-                      <span className="text-xs font-black text-stone-800">عقد العمل والاتفاقية</span>
-                    </div>
-                    {candidate.contractUrl || candidate.contractStoragePath ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        مرفوع ومحفوظ
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-stone-200 text-stone-600">
-                        غير متوفر
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-stone-500">نسخة عقد العمل المعتمدة الموقعة بين صاحب العمل والمرشح.</p>
-                </div>
-
-                <div className="pt-2 border-t border-stone-200/80 flex items-center justify-between gap-2">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-stone-300 hover:border-[#172a46] rounded-xl text-xs font-bold text-stone-700 cursor-pointer transition-colors shadow-2xs">
-                    {uploadingFolder === "contract" ? (
-                      <Loader2 className="w-3.5 h-3.5 text-[#c9a84c] animate-spin" />
-                    ) : (
-                      <Upload className="w-3.5 h-3.5 text-[#c9a84c]" />
-                    )}
-                    <span>{uploadingFolder === "contract" ? "جاري الحفظ..." : (candidate.contractUrl || candidate.contractStoragePath) ? "استبدال" : "رفع العقد"}</span>
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      disabled={uploadingFolder === "contract"}
-                      onChange={e => handleFileUpload("contract", e)}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {(candidate.contractUrl || candidate.contractStoragePath) && (
-                    <div className="flex items-center gap-1.5">
-                      {candidate.contractUrl && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActivePreviewDoc({
-                              title: "عقد العمل والاتفاقية",
-                              url: candidate.contractUrl!,
-                              isPdf: candidate.contractUrl!.startsWith("data:application/pdf") || candidate.contractUrl!.includes(".pdf"),
-                              folder: "contract"
-                            })
-                          }
-                          className="px-2.5 py-1.5 bg-[#172a46] text-white hover:bg-[#203a60] rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
-                          title="معاينة العقد"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-[#c9a84c]" />
-                          <span>معاينة</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDocument("contract")}
-                        className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors"
-                        title="حذف العقد"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 4. Medical Document */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col justify-between gap-3 shadow-2xs hover:border-[#c9a84c]/40 transition-colors">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Stethoscope className="w-4 h-4 text-[#c9a84c]" />
-                      <span className="text-xs font-black text-stone-800">التقرير الطبي</span>
-                    </div>
-                    {candidate.medicalUrl || candidate.medicalStoragePath ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        مرفوع ومحفوظ
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-stone-200 text-stone-600">
-                        غير متوفر
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-stone-500">شهادة الكشف الطبي من المراكز المعتمدة (وافق / لائق طبياً).</p>
-                </div>
-
-                <div className="pt-2 border-t border-stone-200/80 flex items-center justify-between gap-2">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-stone-300 hover:border-[#172a46] rounded-xl text-xs font-bold text-stone-700 cursor-pointer transition-colors shadow-2xs">
-                    {uploadingFolder === "medical" ? (
-                      <Loader2 className="w-3.5 h-3.5 text-[#c9a84c] animate-spin" />
-                    ) : (
-                      <Upload className="w-3.5 h-3.5 text-[#c9a84c]" />
-                    )}
-                    <span>{uploadingFolder === "medical" ? "جاري الحفظ..." : (candidate.medicalUrl || candidate.medicalStoragePath) ? "استبدال" : "رفع التقرير"}</span>
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      disabled={uploadingFolder === "medical"}
-                      onChange={e => handleFileUpload("medical", e)}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {(candidate.medicalUrl || candidate.medicalStoragePath) && (
-                    <div className="flex items-center gap-1.5">
-                      {candidate.medicalUrl && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActivePreviewDoc({
-                              title: "التقرير الطبي",
-                              url: candidate.medicalUrl!,
-                              isPdf: candidate.medicalUrl!.startsWith("data:application/pdf") || candidate.medicalUrl!.includes(".pdf"),
-                              folder: "medical"
-                            })
-                          }
-                          className="px-2.5 py-1.5 bg-[#172a46] text-white hover:bg-[#203a60] rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
-                          title="معاينة التقرير"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-[#c9a84c]" />
-                          <span>معاينة</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDocument("medical")}
-                        className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors"
-                        title="حذف التقرير"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 5. COC Certificate Document */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col justify-between gap-3 shadow-2xs hover:border-[#c9a84c]/40 transition-colors">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <GraduationCap className="w-4 h-4 text-[#c9a84c]" />
-                      <span className="text-xs font-black text-stone-800">شهادة الكفاءة المهنية (COC)</span>
-                    </div>
-                    {candidate.cocImageUrl || candidate.cocStoragePath ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        مرفوع ومحفوظ
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-stone-200 text-stone-600">
-                        غير متوفر
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-stone-500">شهادة اجتياز الفحص المهني والتدريب للمهن المعتمدة.</p>
-                </div>
-
-                <div className="pt-2 border-t border-stone-200/80 flex items-center justify-between gap-2">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-stone-300 hover:border-[#172a46] rounded-xl text-xs font-bold text-stone-700 cursor-pointer transition-colors shadow-2xs">
-                    {uploadingFolder === "coc" ? (
-                      <Loader2 className="w-3.5 h-3.5 text-[#c9a84c] animate-spin" />
-                    ) : (
-                      <Upload className="w-3.5 h-3.5 text-[#c9a84c]" />
-                    )}
-                    <span>{uploadingFolder === "coc" ? "جاري الحفظ..." : (candidate.cocImageUrl || candidate.cocStoragePath) ? "استبدال" : "رفع COC"}</span>
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      disabled={uploadingFolder === "coc"}
-                      onChange={e => handleFileUpload("coc", e)}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {(candidate.cocImageUrl || candidate.cocStoragePath) && (
-                    <div className="flex items-center gap-1.5">
-                      {candidate.cocImageUrl && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActivePreviewDoc({
-                              title: "شهادة الكفاءة المهنية (COC)",
-                              url: candidate.cocImageUrl!,
-                              isPdf: candidate.cocImageUrl!.startsWith("data:application/pdf") || candidate.cocImageUrl!.includes(".pdf"),
-                              folder: "coc"
-                            })
-                          }
-                          className="px-2.5 py-1.5 bg-[#172a46] text-white hover:bg-[#203a60] rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
-                          title="معاينة الشهادة"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-[#c9a84c]" />
-                          <span>معاينة</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDocument("coc")}
-                        className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors"
-                        title="حذف الشهادة"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 6. Visa Document */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col justify-between gap-3 shadow-2xs hover:border-[#c9a84c]/40 transition-colors">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Plane className="w-4 h-4 text-[#c9a84c]" />
-                      <span className="text-xs font-black text-stone-800">تأشيرة الدخول (الفيزا)</span>
-                    </div>
-                    {candidate.visaUrl || candidate.visaStoragePath ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        مرفوع ومحفوظ
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-stone-200 text-stone-600">
-                        غير متوفر
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-stone-500">صورة التأشيرة الصادرة من منصة مساند أو وزارة الموارد البشرية.</p>
-                </div>
-
-                <div className="pt-2 border-t border-stone-200/80 flex items-center justify-between gap-2">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-stone-300 hover:border-[#172a46] rounded-xl text-xs font-bold text-stone-700 cursor-pointer transition-colors shadow-2xs">
-                    {uploadingFolder === "visa" ? (
-                      <Loader2 className="w-3.5 h-3.5 text-[#c9a84c] animate-spin" />
-                    ) : (
-                      <Upload className="w-3.5 h-3.5 text-[#c9a84c]" />
-                    )}
-                    <span>{uploadingFolder === "visa" ? "جاري الحفظ..." : (candidate.visaUrl || candidate.visaStoragePath) ? "استبدال" : "رفع التأشيرة"}</span>
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      disabled={uploadingFolder === "visa"}
-                      onChange={e => handleFileUpload("visa", e)}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {(candidate.visaUrl || candidate.visaStoragePath) && (
-                    <div className="flex items-center gap-1.5">
-                      {candidate.visaUrl && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActivePreviewDoc({
-                              title: "تأشيرة الدخول (الفيزا)",
-                              url: candidate.visaUrl!,
-                              isPdf: candidate.visaUrl!.startsWith("data:application/pdf") || candidate.visaUrl!.includes(".pdf"),
-                              folder: "visa"
-                            })
-                          }
-                          className="px-2.5 py-1.5 bg-[#172a46] text-white hover:bg-[#203a60] rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
-                          title="معاينة التأشيرة"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-[#c9a84c]" />
-                          <span>معاينة</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDocument("visa")}
-                        className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors"
-                        title="حذف التأشيرة"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Notes Section */}
-          <div className="bg-white p-6 rounded-3xl border border-stone-100 shadow-xs space-y-4">
-            <h3 className="font-black text-sm text-[#172a46] flex items-center gap-2">
-              <FileText className="w-5 h-5 text-[#c9a84c]" />
-              <span>الملاحظات وسجل المتابعة الإدارية</span>
-            </h3>
-
-            <textarea
-              rows={5}
-              value={candidate.notes || ""}
-              onChange={e => onUpdate(candidate.id, { notes: e.target.value })}
-              className="w-full p-4 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
-              placeholder="اكتب هنا أي تفاصيل خاصة بالمرشح، تفضيلات الكفيل، أو أي متطلبات خاصة بالاستقدام..."
-            />
-
-            <div className="flex justify-end">
-              <button
-                onClick={() => alert("تم حفظ الملاحظات بنجاح")}
-                className="px-4 py-2 bg-[#172a46] text-white rounded-2xl text-xs font-black"
-              >
-                تحديث الملاحظات
-              </button>
-            </div>
-          </div>
-        </div>
+        <CandidateDocumentsAndNotes
+          candidate={candidate}
+          onUpdate={onUpdate}
+          setActivePreviewDoc={setActivePreviewDoc}
+          uploadingFolder={uploadingFolder}
+          uploadError={uploadError}
+          uploadSuccess={uploadSuccess}
+          handleFileUpload={handleFileUpload}
+          handleDeleteDocument={handleDeleteDocument}
+          copiedDocId={copiedDocId}
+          handleCopyDocId={handleCopyDocId}
+        />
       )}
 
       {/* Modal: Add Payment */}
@@ -1820,9 +1426,26 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                 </div>
                 <div className="min-w-0">
                   <h3 className="font-black text-sm sm:text-base text-white truncate">{activePreviewDoc.title}</h3>
-                  <p className="text-[11px] text-stone-300 truncate">
-                    المرشح: {candidate.firstName} {candidate.lastName} ({candidate.id})
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone-300">
+                    <span>المرشح: {candidate.firstName} {candidate.lastName} ({candidate.id})</span>
+                    {activePreviewDoc.id && (
+                      <div className="flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded-md border border-white/15">
+                        <span className="font-mono text-amber-300 font-bold text-[10px]" dir="ltr">{activePreviewDoc.id}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => handleCopyDocId(activePreviewDoc.id!, e)}
+                          className="hover:text-white p-0.5 rounded text-[10px] text-stone-300 transition-colors"
+                          title="نسخ معرّف الوثيقة"
+                        >
+                          {copiedDocId === activePreviewDoc.id ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3 h-3 text-stone-400" />
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">

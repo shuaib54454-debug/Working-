@@ -26,6 +26,7 @@ import { Candidate, AgencySettings, GeneralExpense, StageId } from "../types";
 import { STAGES, formatMoney, calculateCandidateFinance } from "../data/initialData";
 import { CandidateCardSmall } from "./CandidateCard";
 import { MonthlyRevenueChart } from "./MonthlyRevenueChart";
+import { StageDistributionChart } from "./StageDistributionChart";
 import { useLanguage } from "../lib/LanguageContext";
 
 interface DashboardProps {
@@ -341,42 +342,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* Stage Pipeline Breakdown */}
-      <div className="bg-white p-5 sm:p-6 rounded-3xl border border-stone-100 shadow-xs">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-[#c9a84c]" />
-            <h3 className="font-black text-base text-[#172a46]">{t.pipelineBreakdown}</h3>
-          </div>
-          <button
-            onClick={() => onNavigate("list")}
-            className="text-xs font-bold text-[#c9a84c] hover:underline flex items-center gap-1"
-          >
-            <span>{isAr ? "عرض القائمة" : "View list"}</span>
-            <ArrowIcon className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-          {STAGES.slice(0, 8).map(stage => {
-            const count = activeCandidates.filter(c => c.stage === stage.id).length;
-            const stageLabel = (t.stages as Record<string, string>)?.[stage.id] || stage.label;
-            return (
-              <div
-                key={stage.id}
-                onClick={() => onNavigate("list")}
-                className={`p-3 rounded-2xl border transition-all cursor-pointer ${stage.bgColor} hover:shadow-xs border-stone-100`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] font-bold text-stone-600 truncate">{stageLabel}</span>
-                  <span className={`w-2 h-2 rounded-full ${stage.color}`} />
-                </div>
-                <div className="text-xl font-black text-[#172a46]">{count}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* Candidate Stage Distribution Recharts Section */}
+      <StageDistributionChart
+        candidates={candidates}
+        onNavigateToList={() => onNavigate("list")}
+      />
 
       {/* Monthly Revenue Recharts Section */}
       <MonthlyRevenueChart
