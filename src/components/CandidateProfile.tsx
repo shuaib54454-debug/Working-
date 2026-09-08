@@ -282,6 +282,21 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
   const fin = calculateCandidateFinance(candidate);
   const currentStage = STAGES.find(s => s.id === candidate.stage) || STAGES[0];
 
+  // Helper to generate WhatsApp direct chat URL with candidate phone
+  const getWhatsAppChatUrl = (phone?: string, name?: string) => {
+    if (!phone) return "";
+    let cleanDigits = phone.replace(/[^0-9]/g, "");
+    if (!cleanDigits) return "";
+    // Handle common phone prefixes
+    if (cleanDigits.startsWith("05") && cleanDigits.length === 10) {
+      cleanDigits = "966" + cleanDigits.slice(1);
+    } else if (cleanDigits.startsWith("09") && cleanDigits.length === 10) {
+      cleanDigits = "251" + cleanDigits.slice(1);
+    }
+    const greeting = `السلام عليكم ${name || ""}، نتواصل معك من وكالة شُعيب بخصوص ملفك وإجراءاتك.`;
+    return `https://wa.me/${cleanDigits}?text=${encodeURIComponent(greeting)}`;
+  };
+
   // Passport expiry check
   const isPassportExpiringSoon = candidate.passportExpiryDate
     ? new Date(candidate.passportExpiryDate).getTime() - Date.now() < 180 * 24 * 60 * 60 * 1000
@@ -390,6 +405,31 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               <Printer className="w-3.5 h-3.5 text-[#c9a84c]" />
               <span>طباعة</span>
             </button>
+
+            {candidate.phone ? (
+              <a
+                id="btn-whatsapp-header"
+                href={getWhatsAppChatUrl(candidate.phone, `${candidate.firstName} ${candidate.lastName}`)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`فتح محادثة واتساب مع ${candidate.firstName}`}
+                className="flex items-center gap-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white px-3.5 py-2 rounded-2xl text-xs font-black shadow-sm transition-transform active:scale-95"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                <span>مراسلة عبر واتساب</span>
+              </a>
+            ) : (
+              <button
+                id="btn-whatsapp-header-disabled"
+                type="button"
+                onClick={onOpenEditModal}
+                title="أضف رقم هاتف للمرشح أولاً للمراسلة عبر واتساب"
+                className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-stone-300 hover:text-white px-3.5 py-2 rounded-2xl text-xs font-bold transition-colors"
+              >
+                <MessageCircle className="w-3.5 h-3.5 text-stone-400" />
+                <span>مراسلة عبر واتساب</span>
+              </button>
+            )}
 
             <button
               onClick={onOpenEditModal}
@@ -541,12 +581,14 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                 <span className="font-extrabold text-[#172a46] text-sm">{candidate.firstName} {candidate.lastName}</span>
               </div>
 
-              <div>
-                <span className="text-stone-400 font-bold block mb-1">رقم الهاتف</span>
-                <div className="flex items-center gap-2">
-                  <span dir="ltr" className="font-mono font-bold text-stone-800 text-sm">{candidate.phone || "غير محدد"}</span>
-                  {candidate.phone && (
-                    <div className="flex items-center gap-1">
+              <div className="col-span-2 sm:col-span-1">
+                <span className="text-stone-400 font-bold block mb-1">رقم الهاتف والتواصل</span>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span dir="ltr" className="font-mono font-bold text-stone-800 text-sm">
+                      {candidate.phone || "غير محدد"}
+                    </span>
+                    {candidate.phone && (
                       <a
                         href={`tel:${candidate.phone}`}
                         title="اتصال هاتفي مباشر"
@@ -554,16 +596,29 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                       >
                         <PhoneCall className="w-3.5 h-3.5" />
                       </a>
-                      <a
-                        href={`https://wa.me/${candidate.phone.replace(/[^0-9]/g, '')}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="محادثة واتساب"
-                        className="w-7 h-7 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 flex items-center justify-center transition-colors active:scale-95 shadow-xs"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5" />
-                      </a>
-                    </div>
+                    )}
+                  </div>
+
+                  {candidate.phone ? (
+                    <a
+                      id="btn-whatsapp-chat-info"
+                      href={getWhatsAppChatUrl(candidate.phone, `${candidate.firstName} ${candidate.lastName}`)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="فتح محادثة واتساب مع المرشح"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white rounded-xl text-xs font-black transition-transform active:scale-95 shadow-2xs"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>مراسلة عبر واتساب</span>
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={onOpenEditModal}
+                      className="text-[11px] text-[#c9a84c] hover:underline font-bold"
+                    >
+                      + أضف رقم هاتف للمراسلة
+                    </button>
                   )}
                 </div>
               </div>
@@ -571,7 +626,25 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               {candidate.secondPhone && (
                 <div>
                   <span className="text-stone-400 font-bold block mb-1">هاتف إضافي / طوارئ</span>
-                  <span dir="ltr" className="font-mono font-bold text-stone-800">{candidate.secondPhone}</span>
+                  <div className="flex items-center gap-2">
+                    <span dir="ltr" className="font-mono font-bold text-stone-800">{candidate.secondPhone}</span>
+                    <a
+                      href={getWhatsAppChatUrl(candidate.secondPhone, `${candidate.firstName} ${candidate.lastName}`)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="مراسلة الهاتف الإضافي عبر واتساب"
+                      className="w-6 h-6 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 flex items-center justify-center transition-colors active:scale-95"
+                    >
+                      <MessageCircle className="w-3 h-3" />
+                    </a>
+                    <a
+                      href={`tel:${candidate.secondPhone}`}
+                      title="اتصال مباشر"
+                      className="w-6 h-6 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-700 flex items-center justify-center transition-colors active:scale-95"
+                    >
+                      <PhoneCall className="w-3 h-3" />
+                    </a>
+                  </div>
                 </div>
               )}
 

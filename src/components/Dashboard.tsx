@@ -7,6 +7,8 @@ import {
   AlertTriangle,
   ArrowUpRight,
   TrendingUp,
+  TrendingDown,
+  DollarSign,
   Wallet,
   Building2,
   Calendar,
@@ -76,7 +78,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const totalAllExpenses = candidateExpenses + totalGeneralExpenses;
   const totalOutstanding = Math.max(0, totalFees - totalPaid);
   const netExpectedProfit = totalFees - totalAgencyLiabilities - totalAllExpenses;
-  const currentRealizedProfit = totalPaid - totalAllExpenses;
+  const currentRealizedProfit = totalPaid - totalAgencyLiabilities - totalAllExpenses;
+  const collectionPercentage = totalFees > 0 ? Math.min(100, Math.round((totalPaid / totalFees) * 100)) : 0;
+  const profitMargin = totalPaid > 0 ? Math.round((currentRealizedProfit / totalPaid) * 100) : 0;
+
+  // Formatted today date
+  const todayFormatted = new Intl.DateTimeFormat(isAr ? "ar-SA" : "en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  }).format(new Date());
 
   // Counts by stage categories
   const inProcessCount = activeCandidates.filter(c => 
@@ -339,6 +351,182 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <div className="text-2xl sm:text-3xl font-black text-teal-700">{travelledCount}</div>
           <div className="text-[11px] text-stone-400 mt-1">{isAr ? "وصلوا لوجهات عملهم" : "Arrived at destination"}</div>
+        </div>
+      </div>
+
+      {/* Financial Summary Card (بطاقة الملخص المالي حتى تاريخ اليوم) */}
+      <div id="dashboard-financial-summary-card" className="bg-white p-5 sm:p-7 rounded-3xl border border-stone-200/80 shadow-xs space-y-5">
+        {/* Card Header with Current Date */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#c9a84c]/15 text-[#172a46] flex items-center justify-center shadow-2xs">
+              <Wallet className="w-5 h-5 text-[#c9a84c]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-black text-[#172a46]">
+                  {isAr ? "الملخص المالي العام" : "Financial Summary"}
+                </h3>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  {isAr ? "مُحدّث حتى اليوم" : "Live to Date"}
+                </span>
+              </div>
+              <p className="text-xs text-stone-500 flex items-center gap-1.5 mt-0.5">
+                <Calendar className="w-3.5 h-3.5 text-stone-400" />
+                <span>
+                  {isAr
+                    ? `الموقف المالي المحقق حتى تاريخ اليوم: ${todayFormatted}`
+                    : `Financial performance achieved to date: ${todayFormatted}`}
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onOpenGeneralExpenseModal}
+              className="px-3.5 py-2 rounded-2xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95"
+            >
+              <Receipt className="w-3.5 h-3.5 text-amber-600" />
+              <span>{isAr ? "تسجيل مصروف" : "Record Expense"}</span>
+            </button>
+            <button
+              onClick={() => onNavigate("finance")}
+              className="px-3.5 py-2 rounded-2xl bg-[#172a46] hover:bg-[#20395c] text-white text-xs font-black transition-all flex items-center gap-1.5 active:scale-95 shadow-xs"
+            >
+              <Wallet className="w-3.5 h-3.5 text-[#c9a84c]" />
+              <span>{isAr ? "السجل المالي التفصيلي" : "Full Ledger"}</span>
+              <ArrowIcon className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* 3 Core Financial Pillars (Revenue, Expenses, Realized Net Profit) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* 1. Total Revenue / إجمالي الإيرادات المحصلة */}
+          <div className="bg-gradient-to-br from-emerald-50/70 to-emerald-100/30 border border-emerald-200/70 p-5 rounded-2xl relative overflow-hidden transition-all hover:shadow-xs">
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-xs font-black text-emerald-900 flex items-center gap-1.5">
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
+                <span>{isAr ? "إجمالي الإيرادات (المحصلة)" : "Total Revenue (Collected)"}</span>
+              </span>
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-200/60 text-emerald-800">
+                {collectionPercentage}% {isAr ? "مُحصل" : "collected"}
+              </span>
+            </div>
+
+            <div className="text-2xl sm:text-3xl font-black text-emerald-700 font-mono tracking-tight">
+              {formatMoney(totalPaid, settings.currency)}
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-emerald-200/60 flex flex-col gap-1.5 text-[11px] text-emerald-900/80">
+              <div className="flex items-center justify-between font-bold">
+                <span>{isAr ? "إجمالي قيمة العقود النشطة:" : "Total Active Contracts:"}</span>
+                <span className="font-mono">{formatMoney(totalFees, settings.currency)}</span>
+              </div>
+              <div className="w-full bg-emerald-200/60 h-1.5 rounded-full overflow-hidden">
+                <div
+                  className="bg-emerald-600 h-full rounded-full transition-all duration-500"
+                  style={{ width: `${collectionPercentage}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Total Expenses / إجمالي المصروفات */}
+          <div className="bg-gradient-to-br from-rose-50/70 via-amber-50/30 to-amber-100/20 border border-rose-200/70 p-5 rounded-2xl relative overflow-hidden transition-all hover:shadow-xs">
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-xs font-black text-rose-900 flex items-center gap-1.5">
+                <TrendingDown className="w-4 h-4 text-rose-600" />
+                <span>{isAr ? "إجمالي المصروفات الكلية" : "Total Expenses"}</span>
+              </span>
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-200/60 text-rose-800">
+                {isAr ? "تشغيلية وعامة" : "Ops & General"}
+              </span>
+            </div>
+
+            <div className="text-2xl sm:text-3xl font-black text-rose-700 font-mono tracking-tight">
+              {formatMoney(totalAllExpenses, settings.currency)}
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-rose-200/60 flex flex-col gap-1 text-[11px] text-stone-600">
+              <div className="flex items-center justify-between">
+                <span>{isAr ? "مصروفات المرشحين والمعاملات:" : "Candidate Costs:"}</span>
+                <span className="font-bold text-stone-800 font-mono">{formatMoney(candidateExpenses, settings.currency)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>{isAr ? "المصروفات العامة والتشغيل:" : "General & Admin:"}</span>
+                <span className="font-bold text-stone-800 font-mono">{formatMoney(totalGeneralExpenses, settings.currency)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Net Realized Profit to Date / صافي الربح المحقق حتى تاريخ اليوم */}
+          <div className={`p-5 rounded-2xl relative overflow-hidden transition-all hover:shadow-xs border ${
+            currentRealizedProfit >= 0
+              ? "bg-gradient-to-br from-amber-50/80 via-[#c9a84c]/10 to-amber-100/40 border-[#c9a84c]/50 text-[#172a46]"
+              : "bg-gradient-to-br from-red-50 to-rose-100/40 border-red-300 text-red-950"
+          }`}>
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-xs font-black flex items-center gap-1.5 text-[#172a46]">
+                <DollarSign className="w-4 h-4 text-[#c9a84c]" />
+                <span>{isAr ? "صافي الربح المحقق حتى تاريخ اليوم" : "Net Realized Profit to Date"}</span>
+              </span>
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                currentRealizedProfit >= 0
+                  ? "bg-[#c9a84c]/20 text-[#172a46] border border-[#c9a84c]/40"
+                  : "bg-rose-200 text-rose-900"
+              }`}>
+                {currentRealizedProfit >= 0
+                  ? (isAr ? "فائض نقدي محقق" : "Net Surplus")
+                  : (isAr ? "عجز نقدي مؤقت" : "Deficit")}
+              </span>
+            </div>
+
+            <div className={`text-2xl sm:text-3xl font-black font-mono tracking-tight ${
+              currentRealizedProfit >= 0 ? "text-emerald-700" : "text-rose-700"
+            }`}>
+              {formatMoney(currentRealizedProfit, settings.currency)}
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-stone-200/60 flex flex-col gap-1 text-[11px] text-stone-600">
+              <div className="flex items-center justify-between">
+                <span>{isAr ? "هامش الربح من الإيرادات:" : "Realized Profit Margin:"}</span>
+                <span className="font-black text-[#172a46] font-mono">{profitMargin}%</span>
+              </div>
+              <div className="flex items-center justify-between text-stone-500">
+                <span>{isAr ? "صافي الربح المتوقع الكلي:" : "Expected Total Profit:"}</span>
+                <span className="font-bold text-stone-800 font-mono">{formatMoney(netExpectedProfit, settings.currency)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Sub-bar with Outstanding Balance */}
+        <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-stone-600">
+            <span className="font-bold text-stone-800">
+              {isAr ? "المبالغ المتبقية قيد التحصيل:" : "Remaining Balance to Collect:"}
+            </span>
+            <span className="font-black text-rose-600 font-mono">
+              {formatMoney(totalOutstanding, settings.currency)}
+            </span>
+            <span className="text-stone-400 hidden sm:inline">•</span>
+            <span className="text-stone-500 text-[11px]">
+              {isAr
+                ? "تُضاف لصافي الربح المحقق فور استلام الدفعات وسداد أصحاب الأعمال والعملاء"
+                : "Will add to realized profits upon collection from sponsors & clients"}
+            </span>
+          </div>
+
+          <button
+            onClick={() => onNavigate("finance")}
+            className="text-[#c9a84c] hover:underline font-black text-xs flex items-center gap-1 self-end sm:self-auto shrink-0"
+          >
+            <span>{isAr ? "عرض السندات والمقبوضات" : "View Receipts & Payments"}</span>
+            <ArrowIcon className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 

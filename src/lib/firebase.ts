@@ -23,7 +23,9 @@ import {
   updatePassword as firebaseUpdatePassword,
   User,
   setPersistence,
-  browserLocalPersistence
+  browserLocalPersistence,
+  browserSessionPersistence,
+  inMemoryPersistence
 } from "firebase/auth";
 import {
   getStorage,
@@ -39,9 +41,74 @@ import { compressImage } from "./imageUtils";
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
-setPersistence(auth, browserLocalPersistence).catch((err) => {
-  console.warn("Auth persistence error:", err);
-});
+
+// Safe, resilient persistence initialization with fallbacks
+if (typeof window !== "undefined") {
+  (async () => {
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+    } catch (localErr) {
+      console.warn("browserLocalPersistence not available or closed, attempting session persistence:", localErr);
+      try {
+        await setPersistence(auth, browserSessionPersistence);
+      } catch (sessionErr) {
+        console.warn("browserSessionPersistence failed, using in-memory persistence:", sessionErr);
+        await setPersistence(auth, inMemoryPersistence).catch(() => {});
+      }
+    }
+  })();
+
+  // Catch and suppress benign background IndexedDB closure errors (e.g., when browser tabs hide or sleep)
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event?.reason;
+    const msg = typeof reason === "string" ? reason : reason?.message || "";
+    if (
+      msg.includes("Database is closing") ||
+      msg.includes("Database is closing/hidden") ||
+      msg.includes("The database connection is closing") ||
+      reason?.name === "InvalidStateError"
+    ) {
+      console.warn("Safely handled transient background IndexedDB closure:", msg);
+      event.preventDefault();
+    }
+  });
+
+  window.addEventListener("error", (event) => {
+    const msg = event?.message || "";
+    if (
+      msg.includes("Database is closing") ||
+      msg.includes("Database is closing/hidden") ||
+      msg.includes("The database connection is closing")
+    ) {
+      console.warn("Safely suppressed window error regarding closing database:", msg);
+      event.preventDefault();
+    }
+  });
+}
+
+// Resilient helper to retry auth & DB operations if IndexedDB was momentarily closing/hidden
+async function withDbRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 350): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      const isDbClosing =
+        msg.includes("Database is closing") ||
+        msg.includes("Database is closing/hidden") ||
+        msg.includes("The database connection is closing") ||
+        err?.name === "InvalidStateError";
+      if (isDbClosing && attempt < retries) {
+        attempt++;
+        console.warn(`Encountered closing database state (attempt ${attempt}/${retries}), retrying in ${delayMs}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
 
 const databaseId =
   firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)"
@@ -114,26 +181,36 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 export async function loginWithEmail(email: string, pass: string): Promise<User> {
-  const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
-  return cred.user;
+  return withDbRetry(async () => {
+    const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
+    return cred.user;
+  });
 }
 
 export async function registerOwnerAccount(email: string, pass: string): Promise<User> {
-  const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
-  return cred.user;
+  return withDbRetry(async () => {
+    const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+    return cred.user;
+  });
 }
 
 export async function logoutUser(): Promise<void> {
-  await firebaseSignOut(auth);
+  return withDbRetry(async () => {
+    await firebaseSignOut(auth);
+  });
 }
 
 export async function resetUserPassword(email: string): Promise<void> {
-  await sendPasswordResetEmail(auth, email.trim());
+  return withDbRetry(async () => {
+    await sendPasswordResetEmail(auth, email.trim());
+  });
 }
 
 export async function changeCurrentUserPassword(newPassword: string): Promise<void> {
   if (!auth.currentUser) throw new Error("No authenticated user");
-  await firebaseUpdatePassword(auth.currentUser, newPassword);
+  return withDbRetry(async () => {
+    await firebaseUpdatePassword(auth.currentUser!, newPassword);
+  });
 }
 
 export function subscribeToAuth(callback: (user: User | null) => void): Unsubscribe {
@@ -147,15 +224,17 @@ export async function testFirebaseConnection(): Promise<boolean> {
     console.log("Firebase Firestore connected successfully");
     return true;
   } catch (error: any) {
+    const errorMsg = error?.message || "";
     if (
       error instanceof Error &&
-      (error.message.includes("the client is offline") ||
-       error.message.includes("unavailable") ||
-       error.message.includes("offline"))
+      (errorMsg.includes("the client is offline") ||
+       errorMsg.includes("unavailable") ||
+       errorMsg.includes("offline") ||
+       errorMsg.includes("Database is closing"))
     ) {
       console.warn("Firebase client is currently in offline mode / reconnecting");
     } else {
-      console.log("Firebase Firestore initialized:", error?.message || "ready");
+      console.log("Firebase Firestore initialized:", errorMsg || "ready");
     }
     return false;
   }
@@ -175,6 +254,11 @@ export function subscribeToCandidates(
       onUpdate(list);
     },
     (error) => {
+      const msg = error?.message || "";
+      if (msg.includes("Database is closing") || msg.includes("Database is closing/hidden")) {
+        console.warn("Candidates snapshot paused due to temporary database closing/hidden state");
+        return;
+      }
       handleFirestoreError(error, OperationType.LIST, "candidates");
       onError?.(error);
     }
@@ -186,7 +270,9 @@ export async function syncCandidateToCloud(candidate: Candidate, ownerUid?: stri
   if (!uid) return;
   const path = `candidates/${candidate.id}`;
   try {
-    await setDoc(doc(db, "candidates", candidate.id), { ...candidate, ownerUid: uid }, { merge: true });
+    await withDbRetry(async () => {
+      await setDoc(doc(db, "candidates", candidate.id), { ...candidate, ownerUid: uid }, { merge: true });
+    });
   } catch (e) {
     handleFirestoreError(e, OperationType.WRITE, path);
   }
@@ -196,7 +282,9 @@ export async function deleteCandidateFromCloud(candidateId: string): Promise<voi
   const path = `candidates/${candidateId}`;
   try {
     if (!auth.currentUser) return;
-    await deleteDoc(doc(db, "candidates", candidateId));
+    await withDbRetry(async () => {
+      await deleteDoc(doc(db, "candidates", candidateId));
+    });
   } catch (e) {
     handleFirestoreError(e, OperationType.DELETE, path);
   }
@@ -206,11 +294,13 @@ export async function syncAllCandidatesBatch(candidates: Candidate[], ownerUid?:
   try {
     const uid = ownerUid || auth.currentUser?.uid;
     if (!uid || candidates.length === 0) return;
-    const batch = writeBatch(db);
-    candidates.forEach((cand) => {
-      batch.set(doc(db, "candidates", cand.id), { ...cand, ownerUid: uid }, { merge: true });
+    await withDbRetry(async () => {
+      const batch = writeBatch(db);
+      candidates.forEach((cand) => {
+        batch.set(doc(db, "candidates", cand.id), { ...cand, ownerUid: uid }, { merge: true });
+      });
+      await batch.commit();
     });
-    await batch.commit();
   } catch (e) {
     handleFirestoreError(e, OperationType.WRITE, "candidates/batch");
   }
@@ -230,6 +320,11 @@ export function subscribeToExpenses(
       onUpdate(list);
     },
     (error) => {
+      const msg = error?.message || "";
+      if (msg.includes("Database is closing") || msg.includes("Database is closing/hidden")) {
+        console.warn("Expenses snapshot paused due to temporary database closing/hidden state");
+        return;
+      }
       handleFirestoreError(error, OperationType.LIST, "expenses");
       onError?.(error);
     }
@@ -241,7 +336,9 @@ export async function syncExpenseToCloud(expense: GeneralExpense, ownerUid?: str
   if (!uid) return;
   const path = `expenses/${expense.id}`;
   try {
-    await setDoc(doc(db, "expenses", String(expense.id)), { ...expense, ownerUid: uid }, { merge: true });
+    await withDbRetry(async () => {
+      await setDoc(doc(db, "expenses", String(expense.id)), { ...expense, ownerUid: uid }, { merge: true });
+    });
   } catch (e) {
     handleFirestoreError(e, OperationType.WRITE, path);
   }
@@ -251,7 +348,9 @@ export async function deleteExpenseFromCloud(expenseId: string | number): Promis
   const path = `expenses/${expenseId}`;
   try {
     if (!auth.currentUser) return;
-    await deleteDoc(doc(db, "expenses", String(expenseId)));
+    await withDbRetry(async () => {
+      await deleteDoc(doc(db, "expenses", String(expenseId)));
+    });
   } catch (e) {
     handleFirestoreError(e, OperationType.DELETE, path);
   }
@@ -261,11 +360,13 @@ export async function syncAllExpensesBatch(expenses: GeneralExpense[], ownerUid?
   try {
     const uid = ownerUid || auth.currentUser?.uid;
     if (!uid || expenses.length === 0) return;
-    const batch = writeBatch(db);
-    expenses.forEach((exp) => {
-      batch.set(doc(db, "expenses", String(exp.id)), { ...exp, ownerUid: uid }, { merge: true });
+    await withDbRetry(async () => {
+      const batch = writeBatch(db);
+      expenses.forEach((exp) => {
+        batch.set(doc(db, "expenses", String(exp.id)), { ...exp, ownerUid: uid }, { merge: true });
+      });
+      await batch.commit();
     });
-    await batch.commit();
   } catch (e) {
     handleFirestoreError(e, OperationType.WRITE, "expenses/batch");
   }
@@ -286,6 +387,11 @@ export function subscribeToSettings(
       }
     },
     (error) => {
+      const msg = error?.message || "";
+      if (msg.includes("Database is closing") || msg.includes("Database is closing/hidden")) {
+        console.warn("Settings snapshot paused due to temporary database closing/hidden state");
+        return;
+      }
       handleFirestoreError(error, OperationType.GET, `settings/${ownerUid}`);
       onError?.(error);
     }
@@ -297,7 +403,9 @@ export async function syncSettingsToCloud(settings: AgencySettings, ownerUid?: s
   if (!uid) return;
   const path = `settings/${uid}`;
   try {
-    await setDoc(doc(db, "settings", uid), { ...settings, ownerUid: uid }, { merge: true });
+    await withDbRetry(async () => {
+      await setDoc(doc(db, "settings", uid), { ...settings, ownerUid: uid }, { merge: true });
+    });
   } catch (e) {
     handleFirestoreError(e, OperationType.WRITE, path);
   }

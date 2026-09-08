@@ -57,6 +57,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
         msg = isAr ? "صيغة البريد الإلكتروني غير صحيحة" : "Invalid email format";
       } else if (msg.includes("auth/weak-password")) {
         msg = isAr ? "كلمة المرور ضعيفة جدًا" : "Password is too weak";
+      } else if (msg.includes("Database is closing") || msg.includes("Database is closing/hidden") || err?.name === "InvalidStateError") {
+        msg = isAr
+          ? "جاري إعادة مزامنة جلسة التخزين، يرجى المحاولة مرة أخرى."
+          : "Storage session is reconnecting, please try again.";
       }
       setError(msg);
     } finally {
