@@ -1,0 +1,38 @@
+name: Firebase Rules Tests
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rules:
+    name: 🔐 Firestore & Storage Rules
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 📦 Install project dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: 🔥 Run Firebase Emulator Rules Tests
+        run: |
+          npx --yes firebase-tools@latest emulators:exec --only firestore,storage \
+            "npx --yes -p @firebase/rules-unit-testing -p tsx tsx scripts/firebase-rules.test.ts"
