@@ -43,8 +43,11 @@ import {
   Copy,
   Check,
   FilePlus,
-  Sparkles
+  Sparkles,
+  CalendarPlus
 } from "lucide-react";
+import { getAccessToken, googleSignIn } from "../lib/googleAuth";
+import { syncCandidateAppointment } from "../lib/googleCalendar";
 import { Candidate, AgencySettings, StageId, PaymentRecord, CandidateExpense, WorkerDocumentRecord, CandidateNoteEntry } from "../types";
 import { STAGES, formatMoney, getTodayDateString, calculateCandidateFinance } from "../data/initialData";
 import { exportElementToPDF } from "../lib/pdfUtils";
@@ -62,6 +65,7 @@ interface CandidateProfileProps {
   onDelete: (id: string) => void;
   onOpenEditModal: () => void;
   onPrintReceipt: (data: ReceiptData) => void;
+  onOpenCalendarModal?: () => void;
 }
 
 export const CandidateProfile: React.FC<CandidateProfileProps> = ({
@@ -72,7 +76,8 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
   onArchive,
   onDelete,
   onOpenEditModal,
-  onPrintReceipt
+  onPrintReceipt,
+  onOpenCalendarModal
 }) => {
   const [activeTab, setActiveTab] = useState<"INFO" | "STEPS" | "MONEY" | "DOCS">("INFO");
   const [showScannerModal, setShowScannerModal] = useState(false);
@@ -94,6 +99,47 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
   // Agency Liability Modal State
   const [showEditLiabilityModal, setShowEditLiabilityModal] = useState(false);
   const [liabilityAmount, setLiabilityAmount] = useState("");
+
+  // Google Calendar direct sync state
+  const [calendarSyncLoading, setCalendarSyncLoading] = useState<"medical" | "flight" | null>(null);
+  const [calendarSyncSuccess, setCalendarSyncSuccess] = useState<string | null>(null);
+  const [calendarSyncError, setCalendarSyncError] = useState<string | null>(null);
+
+  const handleCalendarSyncDirect = async (type: "medical" | "flight") => {
+    try {
+      setCalendarSyncLoading(type);
+      setCalendarSyncSuccess(null);
+      setCalendarSyncError(null);
+      let token = await getAccessToken();
+      if (!token) {
+        const res = await googleSignIn();
+        if (res) {
+          token = res.accessToken;
+        } else {
+          return;
+        }
+      }
+      if (!token) return;
+
+      const res = await syncCandidateAppointment(token, candidate, { eventType: type });
+      if (res.success) {
+        setCalendarSyncSuccess(
+          type === "medical"
+            ? "تمت إضافة وتأكيد موعد الفحص الطبي في تقويم Google مع التذكيرات الآلية بنجاح!"
+            : "تمت إضافة وتأكيد موعد رحلة الطيران في تقويم Google مع التذكيرات الآلية بنجاح!"
+        );
+        setTimeout(() => setCalendarSyncSuccess(null), 4500);
+      } else {
+        setCalendarSyncError(res.error || "تعذر إرسال الموعد إلى تقويم Google");
+        setTimeout(() => setCalendarSyncError(null), 4500);
+      }
+    } catch (err: any) {
+      setCalendarSyncError(err.message || "حدث خطأ أثناء الاتصال بتقويم Google");
+      setTimeout(() => setCalendarSyncError(null), 4500);
+    } finally {
+      setCalendarSyncLoading(null);
+    }
+  };
 
   // Cloud Storage & Document State
   const [uploadingFolder, setUploadingFolder] = useState<WorkerStorageFolder | null>(null);
@@ -439,6 +485,17 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               <span>تعديل البيانات</span>
             </button>
 
+            {onOpenCalendarModal && (
+              <button
+                onClick={onOpenCalendarModal}
+                title="مزامنة المواعيد مع تقويم Google Calendar"
+                className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-sky-200 hover:text-white px-3.5 py-2 rounded-2xl text-xs font-bold transition-colors"
+              >
+                <Calendar className="w-3.5 h-3.5 text-sky-300" />
+                <span>تقويم المواعيد</span>
+              </button>
+            )}
+
             <button
               onClick={() => onArchive(candidate.id)}
               className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-stone-300 hover:text-white px-3.5 py-2 rounded-2xl text-xs font-bold transition-colors"
@@ -562,6 +619,31 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Google Calendar Sync Feedback Alerts */}
+      {calendarSyncSuccess && (
+        <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-4 rounded-2xl text-xs font-black flex items-center justify-between shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{calendarSyncSuccess}</span>
+          </div>
+          <button onClick={() => setCalendarSyncSuccess(null)} className="text-emerald-700 hover:text-emerald-900">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {calendarSyncError && (
+        <div className="bg-rose-50 border border-rose-300 text-rose-900 p-4 rounded-2xl text-xs font-black flex items-center justify-between shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{calendarSyncError}</span>
+          </div>
+          <button onClick={() => setCalendarSyncError(null)} className="text-rose-700 hover:text-rose-900">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* =========================================================================
           TAB 1: INFO (البيانات الشخصية وجواز السفر)
@@ -858,19 +940,54 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-2 text-xs">
-                <div>
-                  <label className="block text-stone-400 font-bold mb-1">حالة الفحص الطبي</label>
-                  <select
-                    value={candidate.medicalStatus || "لم يفحص"}
-                    onChange={e => onUpdate(candidate.id, { medicalStatus: e.target.value })}
-                    className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-1 focus:ring-[#c9a84c]"
+              <div className="space-y-3 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-stone-400 font-bold mb-1">حالة الفحص الطبي</label>
+                    <select
+                      value={candidate.medicalStatus || "لم يفحص"}
+                      onChange={e => onUpdate(candidate.id, { medicalStatus: e.target.value })}
+                      className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-1 focus:ring-[#c9a84c]"
+                    >
+                      <option value="لم يفحص">لم يفحص بعد</option>
+                      <option value="بانتظار النتيجة">بانتظار ظهور النتيجة</option>
+                      <option value="لائق طبياً (مكتمل)">لائق طبياً (مكتمل معتمد)</option>
+                      <option value="غير لائق طبياً">غير لائق طبياً (مستبعد)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-stone-400 font-bold mb-1">تاريخ الفحص الطبي</label>
+                    <input
+                      type="date"
+                      value={candidate.medicalDate || ""}
+                      onChange={e => onUpdate(candidate.id, { medicalDate: e.target.value })}
+                      className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-1 focus:ring-[#c9a84c]"
+                    />
+                  </div>
+                </div>
+
+                {/* Google Calendar Direct Sync for Medical */}
+                <div className="pt-2 border-t border-stone-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCalendarSyncDirect("medical")}
+                    disabled={calendarSyncLoading === "medical" || !candidate.medicalDate}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-black flex items-center gap-2 transition-all active:scale-95 disabled:opacity-40"
+                    title={candidate.medicalDate ? "مزامنة هذا الموعد مع تقويم Google" : "حدد تاريخ الفحص أولاً لتفعيله بالتقويم"}
                   >
-                    <option value="لم يفحص">لم يفحص بعد</option>
-                    <option value="بانتظار النتيجة">بانتظار ظهور النتيجة</option>
-                    <option value="لائق طبياً (مكتمل)">لائق طبياً (مكتمل معتمد)</option>
-                    <option value="غير لائق طبياً">غير لائق طبياً (مستبعد)</option>
-                  </select>
+                    {calendarSyncLoading === "medical" ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                    ) : (
+                      <CalendarPlus className="w-3.5 h-3.5 text-emerald-600" />
+                    )}
+                    <span>مزامنة الفحص مع Google Calendar</span>
+                  </button>
+
+                  {candidate.medicalDate && (
+                    <span className="text-[11px] font-bold text-stone-500 font-mono">
+                      📅 {candidate.medicalDate}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -1024,6 +1141,30 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                     onChange={e => onUpdate(candidate.id, { flightTicketNumber: e.target.value })}
                     className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold outline-none focus:ring-1 focus:ring-[#c9a84c]"
                   />
+                </div>
+
+                {/* Google Calendar Direct Sync for Flight */}
+                <div className="pt-2 border-t border-stone-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCalendarSyncDirect("flight")}
+                    disabled={calendarSyncLoading === "flight" || !candidate.flightDate}
+                    className="px-3.5 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-black flex items-center gap-2 transition-all active:scale-95 disabled:opacity-40"
+                    title={candidate.flightDate ? "مزامنة موعد الرحلة مع تقويم Google" : "حدد تاريخ الرحلة أولاً لتفعيله بالتقويم"}
+                  >
+                    {calendarSyncLoading === "flight" ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600" />
+                    ) : (
+                      <Plane className="w-3.5 h-3.5 text-sky-600" />
+                    )}
+                    <span>مزامنة الرحلة مع Google Calendar</span>
+                  </button>
+
+                  {candidate.flightDate && (
+                    <span className="text-[11px] font-bold text-stone-500 font-mono">
+                      ✈️ {candidate.flightDate}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

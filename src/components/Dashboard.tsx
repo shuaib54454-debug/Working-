@@ -42,6 +42,7 @@ interface DashboardProps {
   onOpenExportModal?: () => void;
   onOpenPassportScanner?: () => void;
   onOpenGoogleSheetsModal?: () => void;
+  onOpenGoogleCalendarModal?: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -54,7 +55,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onOpenGeneralExpenseModal,
   onOpenExportModal,
   onOpenPassportScanner,
-  onOpenGoogleSheetsModal
+  onOpenGoogleSheetsModal,
+  onOpenGoogleCalendarModal
 }) => {
   const { t, isAr } = useLanguage();
   const ArrowIcon = isAr ? ChevronLeft : ChevronRight;
@@ -192,6 +194,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
                   <span className="hidden sm:inline">Google Sheets</span>
+                </button>
+              )}
+              {onOpenGoogleCalendarModal && (
+                <button
+                  onClick={onOpenGoogleCalendarModal}
+                  title={isAr ? "مزامنة المواعيد مع تقويم Google" : "Google Calendar Sync"}
+                  className="bg-sky-600/20 hover:bg-sky-600/30 text-sky-200 border border-sky-500/30 px-3.5 py-2.5 rounded-2xl font-bold text-sm transition-all flex items-center gap-1.5 active:scale-95"
+                >
+                  <Calendar className="w-4 h-4 text-sky-300" />
+                  <span className="hidden sm:inline">{isAr ? "تقويم Google" : "Calendar"}</span>
                 </button>
               )}
               {onOpenExportModal && (
@@ -667,6 +679,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </span>
               <ArrowIcon className="w-4 h-4" />
             </button>
+
+            {onOpenGoogleCalendarModal && (
+              <button
+                onClick={onOpenGoogleCalendarModal}
+                className="w-full p-3.5 rounded-2xl bg-sky-50 hover:bg-sky-100 text-[#172a46] text-xs font-black flex items-center justify-between border border-sky-200 transition-all"
+              >
+                <span className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-sky-600" />
+                  {isAr ? "مواعيد تقويم Google (Calendar)" : "Google Calendar Appointments"}
+                </span>
+                <ArrowIcon className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           {/* Agency Details Card */}

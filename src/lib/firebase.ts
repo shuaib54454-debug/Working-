@@ -110,10 +110,8 @@ async function withDbRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 350):
   }
 }
 
-const databaseId =
-  firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)"
-    ? firebaseConfig.firestoreDatabaseId
-    : undefined;
+const rawDbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+const databaseId = rawDbId && rawDbId !== "(default)" ? rawDbId : undefined;
 
 let firestoreInstance;
 try {
@@ -194,9 +192,28 @@ export async function registerOwnerAccount(email: string, pass: string): Promise
   });
 }
 
+export interface AppUser {
+  uid: string;
+  email: string | null;
+  displayName?: string | null;
+  isLocal?: boolean;
+}
+
+let localUserListener: ((user: User | AppUser | null) => void) | null = null;
+
 export async function logoutUser(): Promise<void> {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("shuayb_local_user");
+  }
+  if (localUserListener && !auth.currentUser) {
+    localUserListener(null);
+  }
   return withDbRetry(async () => {
-    await firebaseSignOut(auth);
+    try {
+      await firebaseSignOut(auth);
+    } catch (e) {
+      console.warn("Sign out err:", e);
+    }
   });
 }
 
@@ -213,8 +230,46 @@ export async function changeCurrentUserPassword(newPassword: string): Promise<vo
   });
 }
 
-export function subscribeToAuth(callback: (user: User | null) => void): Unsubscribe {
-  return onAuthStateChanged(auth, callback);
+export function setLocalUser(user: AppUser | null) {
+  if (typeof window !== "undefined") {
+    if (user) {
+      localStorage.setItem("shuayb_local_user", JSON.stringify(user));
+    } else {
+      localStorage.removeItem("shuayb_local_user");
+    }
+  }
+  if (localUserListener && !auth.currentUser) {
+    localUserListener(user);
+  }
+}
+
+export function subscribeToAuth(callback: (user: User | AppUser | null) => void): Unsubscribe {
+  localUserListener = callback;
+  const unsub = onAuthStateChanged(auth, (firebaseUser) => {
+    if (firebaseUser) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("shuayb_local_user");
+      }
+      callback(firebaseUser);
+    } else {
+      if (typeof window !== "undefined") {
+        const localRaw = localStorage.getItem("shuayb_local_user");
+        if (localRaw) {
+          try {
+            const parsed = JSON.parse(localRaw);
+            callback(parsed);
+            return;
+          } catch {}
+        }
+      }
+      callback(null);
+    }
+  });
+
+  return () => {
+    unsub();
+    localUserListener = null;
+  };
 }
 
 export async function testFirebaseConnection(): Promise<boolean> {
@@ -266,7 +321,8 @@ export function subscribeToCandidates(
 }
 
 export async function syncCandidateToCloud(candidate: Candidate, ownerUid?: string): Promise<void> {
-  const uid = ownerUid || auth.currentUser?.uid;
+  if (!auth.currentUser) return;
+  const uid = ownerUid || auth.currentUser.uid;
   if (!uid) return;
   const path = `candidates/${candidate.id}`;
   try {
@@ -292,7 +348,8 @@ export async function deleteCandidateFromCloud(candidateId: string): Promise<voi
 
 export async function syncAllCandidatesBatch(candidates: Candidate[], ownerUid?: string): Promise<void> {
   try {
-    const uid = ownerUid || auth.currentUser?.uid;
+    if (!auth.currentUser) return;
+    const uid = ownerUid || auth.currentUser.uid;
     if (!uid || candidates.length === 0) return;
     await withDbRetry(async () => {
       const batch = writeBatch(db);
@@ -332,7 +389,8 @@ export function subscribeToExpenses(
 }
 
 export async function syncExpenseToCloud(expense: GeneralExpense, ownerUid?: string): Promise<void> {
-  const uid = ownerUid || auth.currentUser?.uid;
+  if (!auth.currentUser) return;
+  const uid = ownerUid || auth.currentUser.uid;
   if (!uid) return;
   const path = `expenses/${expense.id}`;
   try {
@@ -358,7 +416,8 @@ export async function deleteExpenseFromCloud(expenseId: string | number): Promis
 
 export async function syncAllExpensesBatch(expenses: GeneralExpense[], ownerUid?: string): Promise<void> {
   try {
-    const uid = ownerUid || auth.currentUser?.uid;
+    if (!auth.currentUser) return;
+    const uid = ownerUid || auth.currentUser.uid;
     if (!uid || expenses.length === 0) return;
     await withDbRetry(async () => {
       const batch = writeBatch(db);
@@ -399,7 +458,8 @@ export function subscribeToSettings(
 }
 
 export async function syncSettingsToCloud(settings: AgencySettings, ownerUid?: string): Promise<void> {
-  const uid = ownerUid || auth.currentUser?.uid;
+  if (!auth.currentUser) return;
+  const uid = ownerUid || auth.currentUser.uid;
   if (!uid) return;
   const path = `settings/${uid}`;
   try {

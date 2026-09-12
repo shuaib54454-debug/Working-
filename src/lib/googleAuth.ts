@@ -20,7 +20,8 @@ export const WORKSPACE_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets.readonly",
   "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/drive.readonly",
-  "https://www.googleapis.com/auth/drive"
+  "https://www.googleapis.com/auth/drive",
+  "https://www.googleapis.com/auth/calendar.events"
 ];
 
 WORKSPACE_SCOPES.forEach(scope => {
@@ -73,12 +74,8 @@ export const googleSignIn = async (): Promise<{
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
 
-    if (!credential?.accessToken) {
-      throw new Error("لم يتم الحصول على تصريح الوصول من حساب Google.");
-    }
-
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+    cachedAccessToken = credential?.accessToken || null;
+    return { user: result.user, accessToken: cachedAccessToken || "" };
   } catch (error: any) {
     console.error("Google Sign-in error:", error);
     if (error?.code === "auth/unauthorized-domain" || error?.message?.includes("auth/unauthorized-domain")) {

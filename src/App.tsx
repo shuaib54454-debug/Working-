@@ -33,11 +33,13 @@ import { ArchiveView } from "./components/ArchiveView";
 import { SettingsView } from "./components/SettingsView";
 import { ReceiptModal, ReceiptData } from "./components/ReceiptModal";
 import { GoogleSheetsModal } from "./components/GoogleSheetsModal";
+import { GoogleCalendarModal } from "./components/GoogleCalendarModal";
 import { ExportModal } from "./components/ExportModal";
 import { PassportScannerModal } from "./components/PassportScannerModal";
 import { InstallAppModal } from "./components/InstallAppModal";
 import { LoginScreen } from "./components/LoginScreen";
 import {
+  AppUser,
   testFirebaseConnection,
   subscribeToAuth,
   subscribeToCandidates,
@@ -61,7 +63,7 @@ import { ShieldCheck, Loader2 } from "lucide-react";
 
 export default function App() {
   // Auth state
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | AppUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const migrationTriggeredRef = useRef(false);
 
@@ -116,6 +118,7 @@ export default function App() {
   // Real-time Cloud Sync with Firestore (scoped by currentUser.uid)
   useEffect(() => {
     if (!currentUser) return;
+    if ((currentUser as AppUser).isLocal) return;
 
     testFirebaseConnection();
 
@@ -164,6 +167,7 @@ export default function App() {
   const [receiptModalData, setReceiptModalData] = useState<ReceiptData | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showSheetsModal, setShowSheetsModal] = useState(false);
+  const [showGoogleCalendarModal, setShowGoogleCalendarModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showPassportScanner, setShowPassportScanner] = useState(false);
   const [showQuickHub, setShowQuickHub] = useState(false);
@@ -195,6 +199,7 @@ export default function App() {
         if (showEditModal) { setShowEditModal(false); return; }
         if (showReceiptModal) { setShowReceiptModal(false); return; }
         if (showSheetsModal) { setShowSheetsModal(false); return; }
+        if (showGoogleCalendarModal) { setShowGoogleCalendarModal(false); return; }
         if (showExportModal) { setShowExportModal(false); return; }
         if (showPassportScanner) { setShowPassportScanner(false); return; }
         if (showQuickHub) { setShowQuickHub(false); return; }
@@ -227,6 +232,7 @@ export default function App() {
     showEditModal,
     showReceiptModal,
     showSheetsModal,
+    showGoogleCalendarModal,
     showExportModal,
     showPassportScanner,
     showQuickHub,
@@ -580,7 +586,14 @@ export default function App() {
 
   // If not authenticated, render Login / Register Screen
   if (!currentUser) {
-    return <LoginScreen onSuccess={() => {}} />;
+    return (
+      <LoginScreen
+        onSuccess={() => {}}
+        onContinueLocal={(localUser) => {
+          setCurrentUser(localUser);
+        }}
+      />
+    );
   }
 
   return (
@@ -594,6 +607,7 @@ export default function App() {
         }}
         onAddCandidate={() => setShowAddWizard(true)}
         onOpenGoogleSheetsModal={() => setShowSheetsModal(true)}
+        onOpenGoogleCalendarModal={() => setShowGoogleCalendarModal(true)}
         onOpenPassportScanner={() => setShowPassportScanner(true)}
         onOpenExportModal={() => {
           setExportDefaultTab("CANDIDATES");
@@ -627,6 +641,7 @@ export default function App() {
             }}
             onOpenPassportScanner={() => setShowPassportScanner(true)}
             onOpenGoogleSheetsModal={() => setShowSheetsModal(true)}
+            onOpenGoogleCalendarModal={() => setShowGoogleCalendarModal(true)}
           />
         )}
 
@@ -664,6 +679,7 @@ export default function App() {
             onDelete={handlePermanentDeleteCandidate}
             onOpenEditModal={() => setShowEditModal(true)}
             onPrintReceipt={handlePrintReceipt}
+            onOpenCalendarModal={() => setShowGoogleCalendarModal(true)}
           />
         )}
 
@@ -736,6 +752,7 @@ export default function App() {
         onAddCandidate={() => setShowAddWizard(true)}
         onOpenPassportScanner={() => setShowPassportScanner(true)}
         onOpenGoogleSheetsModal={() => setShowSheetsModal(true)}
+        onOpenGoogleCalendarModal={() => setShowGoogleCalendarModal(true)}
         onOpenExportModal={() => {
           setExportDefaultTab("CANDIDATES");
           setShowExportModal(true);
@@ -760,6 +777,7 @@ export default function App() {
         currentUserEmail={currentUser?.email}
         onOpenPassportScanner={() => setShowPassportScanner(true)}
         onOpenGoogleSheetsModal={() => setShowSheetsModal(true)}
+        onOpenGoogleCalendarModal={() => setShowGoogleCalendarModal(true)}
         onOpenExportModal={() => {
           setExportDefaultTab("CANDIDATES");
           setShowExportModal(true);
@@ -775,6 +793,14 @@ export default function App() {
         generalExpenses={generalExpenses}
         settings={settings}
         onImportCandidates={handleImportCandidatesFromSheets}
+      />
+
+      {/* Modal: Google Calendar Sync & Appointments */}
+      <GoogleCalendarModal
+        isOpen={showGoogleCalendarModal}
+        onClose={() => setShowGoogleCalendarModal(false)}
+        candidates={candidates}
+        onUpdateCandidate={handleUpdateCandidate}
       />
 
       {/* Modal: Add Candidate Wizard */}

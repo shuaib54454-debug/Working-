@@ -24,7 +24,8 @@ import {
   Smartphone,
   CheckCircle2,
   Cloud,
-  Layers
+  Layers,
+  Calendar
 } from "lucide-react";
 import { ActiveView, AgencySettings } from "../types";
 import { useLanguage } from "../lib/LanguageContext";
@@ -36,6 +37,7 @@ export interface NavigationProps {
   onNavigate: (view: ActiveView) => void;
   onAddCandidate: () => void;
   onOpenGoogleSheetsModal?: () => void;
+  onOpenGoogleCalendarModal?: () => void;
   onOpenPassportScanner?: () => void;
   onOpenExportModal?: () => void;
   onOpenInstallModal?: () => void;
@@ -55,6 +57,7 @@ export const TopBar: React.FC<
   onNavigate,
   onAddCandidate,
   onOpenGoogleSheetsModal,
+  onOpenGoogleCalendarModal,
   onOpenPassportScanner,
   onOpenExportModal,
   onOpenInstallModal,
@@ -208,6 +211,18 @@ export const TopBar: React.FC<
             </button>
           )}
 
+          {/* Google Calendar Trigger (Desktop) */}
+          {onOpenGoogleCalendarModal && (
+            <button
+              onClick={onOpenGoogleCalendarModal}
+              title={isAr ? "مزامنة المواعيد مع تقويم Google" : "Google Calendar Sync"}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-xs font-bold transition-all border border-white/10 active:scale-95"
+            >
+              <Calendar className="w-4 h-4 text-[#c9a84c]" />
+              <span>{isAr ? "التقويم" : "Calendar"}</span>
+            </button>
+          )}
+
           {/* Export & PDF Reports Trigger (Desktop) */}
           {onOpenExportModal && (
             <button
@@ -348,6 +363,7 @@ export const MobileQuickActionsSheet: React.FC<{
   onAddCandidate: () => void;
   onOpenPassportScanner?: () => void;
   onOpenGoogleSheetsModal?: () => void;
+  onOpenGoogleCalendarModal?: () => void;
   onOpenExportModal?: () => void;
   onNavigate: (view: ActiveView) => void;
 }> = ({
@@ -356,6 +372,7 @@ export const MobileQuickActionsSheet: React.FC<{
   onAddCandidate,
   onOpenPassportScanner,
   onOpenGoogleSheetsModal,
+  onOpenGoogleCalendarModal,
   onOpenExportModal,
   onNavigate
 }) => {
@@ -475,6 +492,25 @@ export const MobileQuickActionsSheet: React.FC<{
             </button>
           )}
 
+          {/* Action 5: Google Calendar */}
+          {onOpenGoogleCalendarModal && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenGoogleCalendarModal();
+              }}
+              className="flex flex-col items-start p-3.5 rounded-2xl bg-stone-50 hover:bg-amber-50 border border-stone-200 hover:border-amber-300 text-right transition-all active:scale-95 group"
+            >
+              <div className="w-9 h-9 rounded-xl bg-[#172a46] text-[#c9a84c] flex items-center justify-center mb-2 shadow-xs group-hover:scale-105 transition-transform">
+                <Calendar className="w-5 h-5" />
+              </div>
+              <span className="font-extrabold text-xs text-[#172a46]">Google Calendar</span>
+              <span className="text-[10px] text-stone-400 mt-0.5">
+                {isAr ? "مزامنة مواعيد الفحص والسفر" : "Sync medical & flight dates"}
+              </span>
+            </button>
+          )}
+
           {/* Action 5: Export / Reports */}
           {onOpenExportModal && (
             <button
@@ -539,6 +575,7 @@ export const MobileDrawer: React.FC<{
   currentUserEmail?: string | null;
   onOpenPassportScanner?: () => void;
   onOpenGoogleSheetsModal?: () => void;
+  onOpenGoogleCalendarModal?: () => void;
   onOpenExportModal?: () => void;
   onOpenInstallModal?: () => void;
 }> = ({
@@ -551,6 +588,7 @@ export const MobileDrawer: React.FC<{
   currentUserEmail,
   onOpenPassportScanner,
   onOpenGoogleSheetsModal,
+  onOpenGoogleCalendarModal,
   onOpenExportModal,
   onOpenInstallModal
 }) => {
@@ -721,6 +759,21 @@ export const MobileDrawer: React.FC<{
                 {isSheetConnected && (
                   <span className="w-2 h-2 rounded-full bg-emerald-400" />
                 )}
+              </button>
+            )}
+
+            {onOpenGoogleCalendarModal && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onOpenGoogleCalendarModal();
+                }}
+                className="w-full flex items-center justify-between p-2.5 rounded-2xl text-xs font-bold text-stone-200 hover:bg-white/10 transition-colors"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Calendar className="w-4 h-4 text-[#c9a84c]" />
+                  <span>Google Calendar</span>
+                </div>
               </button>
             )}
 
