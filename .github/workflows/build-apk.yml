@@ -103,6 +103,23 @@ jobs:
           npx cap sync android
           node scripts/generate-android-assets.cjs
 
+      - name: 🛡️ Verify Android assets contain frontend only
+        run: |
+          set -euo pipefail
+          ASSETS="android/app/src/main/assets/public"
+          test -d "$ASSETS" || { echo "❌ Android web assets directory is missing."; exit 1; }
+          if find "$ASSETS" -type f \( -name 'server.cjs' -o -name 'server.cjs.map' -o -name 'server.js' -o -name 'server.js.map' \) -print -quit | grep -q .; then
+            echo "❌ Backend source/bundle artifact detected inside Android web assets."
+            find "$ASSETS" -type f \( -name 'server.cjs' -o -name 'server.cjs.map' -o -name 'server.js' -o -name 'server.js.map' \) -print
+            exit 1
+          fi
+          if find "$ASSETS" -type f -name '*.map' -print -quit | grep -q .; then
+            echo "❌ Source map detected inside Android web assets; release APK must not ship frontend source maps."
+            find "$ASSETS" -type f -name '*.map' -print
+            exit 1
+          fi
+          echo "✅ Android assets contain no backend bundle or source maps."
+
       - name: ☕ Setup Java 21 (Temurin)
         uses: actions/setup-java@v5
         with:
