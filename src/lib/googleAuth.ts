@@ -13,14 +13,14 @@ import firebaseConfig from "../../firebase-applet-config.json";
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
-// Configure Google Auth Provider with Google Sheets & Drive Scopes
-export const provider = new GoogleAuthProvider();
+// Request only the Google Workspace scopes actually used by this application.
+// - Sheets scope: create/read/write agency spreadsheets.
+// - Drive readonly: list/read spreadsheet files visible to the signed-in user.
+// - Calendar events: create/read/delete the agency's appointment events.
+// No broad Drive write/full-access scope is requested.
 export const WORKSPACE_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/spreadsheets.readonly",
-  "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/drive.readonly",
-  "https://www.googleapis.com/auth/drive",
   "https://www.googleapis.com/auth/calendar.events"
 ];
 
