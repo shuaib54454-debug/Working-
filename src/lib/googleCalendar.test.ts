@@ -57,8 +57,8 @@ test("creates a calendar event without passport, phone, or sponsor data", async 
     assert.equal(createBody.extendedProperties.private.candidateId, candidate.id);
     assert.equal(createBody.extendedProperties.private.appointmentType, "flight");
     assert.equal(createBody.extendedProperties.private.targetDate, candidate.flightDate);
-    assert.equal(createBody.start.dateTime, "2026-10-15T11:30:00.000Z");
-    assert.equal(createBody.end.dateTime, "2026-10-15T12:30:00.000Z");
+    assert.equal(createBody.start.dateTime, "2026-10-15T14:30:00.000Z");
+    assert.equal(createBody.end.dateTime, "2026-10-15T15:30:00.000Z");
   } finally {
     globalThis.fetch = originalFetch;
   }
