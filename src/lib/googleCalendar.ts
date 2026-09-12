@@ -1,6 +1,6 @@
 /**
- * Google Calendar API Integration for Syncing Candidate Appointments
- * Uses Google Calendar API v3: https://www.googleapis.com/calendar/v3/calendars/primary/events
+ * Google Calendar API Integration for Candidate Appointments
+ * Uses Google Calendar API v3.
  */
 
 import { Candidate } from "../types";
@@ -10,35 +10,22 @@ export interface GoogleCalendarEvent {
   summary: string;
   description?: string;
   location?: string;
-  start: {
-    dateTime?: string;
-    date?: string;
-    timeZone?: string;
-  };
-  end: {
-    dateTime?: string;
-    date?: string;
-    timeZone?: string;
-  };
+  start: { dateTime?: string; date?: string; timeZone?: string };
+  end: { dateTime?: string; date?: string; timeZone?: string };
   reminders?: {
     useDefault: boolean;
-    overrides?: Array<{
-      method: "popup" | "email";
-      minutes: number;
-    }>;
+    overrides?: Array<{ method: "popup" | "email"; minutes: number }>;
   };
-  extendedProperties?: {
-    private?: Record<string, string>;
-  };
+  extendedProperties?: { private?: Record<string, string> };
   htmlLink?: string;
   status?: string;
 }
 
 export interface SyncCandidateAppointmentOptions {
-  calendarId?: string; // defaults to "primary"
-  remindMinutes?: number[]; // e.g. [1440, 120] (1 day & 2 hours before)
+  calendarId?: string;
+  remindMinutes?: number[];
   eventType: "medical" | "flight";
-  timeString?: string; // Optional HH:mm if specific time chosen
+  timeString?: string;
 }
 
 export interface SyncResult {
@@ -50,21 +37,16 @@ export interface SyncResult {
   candidateId: string;
   eventType: "medical" | "flight";
   error?: string;
+  skippedExisting?: boolean;
 }
 
-/**
- * Calculates the next day string (YYYY-MM-DD) for Google Calendar all-day event ends
- */
 export function getNextDayDateString(dateStr: string): string {
   try {
     const parts = dateStr.split("-").map(Number);
     if (parts.length === 3) {
       const d = new Date(parts[0], parts[1] - 1, parts[2]);
       d.setDate(d.getDate() + 1);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, "0");
-      const day = String(d.getDate()).padStart(2, "0");
-      return `${y}-${m}-${day}`;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     }
   } catch {
     // fallback
@@ -72,14 +54,12 @@ export function getNextDayDateString(dateStr: string): string {
   return dateStr;
 }
 
-/**
- * Lists upcoming events from primary calendar to check for existing synced appointments
- */
 export async function listCalendarEvents(
   accessToken: string,
   calendarId = "primary",
   timeMin?: string,
-  maxResults = 100
+  maxResults = 100,
+  timeMax?: string
 ): Promise<GoogleCalendarEvent[]> {
   const params = new URLSearchParams({
     maxResults: String(maxResults),
@@ -87,23 +67,17 @@ export async function listCalendarEvents(
     orderBy: "startTime"
   });
 
-  if (timeMin) {
-    params.set("timeMin", timeMin);
-  } else {
-    // default to 30 days ago to include recent and upcoming events
+  if (timeMin) params.set("timeMin", timeMin);
+  else {
     const past = new Date();
     past.setDate(past.getDate() - 30);
     params.set("timeMin", past.toISOString());
   }
+  if (timeMax) params.set("timeMax", timeMax);
 
   const response = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      }
-    }
+    { headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" } }
   );
 
   if (!response.ok) {
@@ -115,9 +89,6 @@ export async function listCalendarEvents(
   return data.items || [];
 }
 
-/**
- * Creates a new event in the user's Google Calendar
- */
 export async function createCalendarEvent(
   accessToken: string,
   event: GoogleCalendarEvent,
@@ -127,10 +98,7 @@ export async function createCalendarEvent(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
     {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify(event)
     }
   );
@@ -139,13 +107,9 @@ export async function createCalendarEvent(
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.error?.message || `فشل إنشاء الموعد في تقويم Google (${response.status})`);
   }
-
   return await response.json();
 }
 
-/**
- * Deletes an event from Google Calendar by ID
- */
 export async function deleteCalendarEvent(
   accessToken: string,
   eventId: string,
@@ -153,25 +117,24 @@ export async function deleteCalendarEvent(
 ): Promise<boolean> {
   const response = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
-    {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
-    }
+    { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } }
   );
 
   if (!response.ok && response.status !== 404) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.error?.message || `فشل حذف الموعد من التقويم (${response.status})`);
   }
-
   return true;
 }
 
-/**
- * Synchronizes a candidate's specific appointment (medical or flight) to Google Calendar
- */
+function buildDateTimeRange(dateValue: string, timeString?: string) {
+  if (!timeString || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeString)) return null;
+  const start = new Date(`${dateValue}T${timeString}:00`);
+  if (Number.isNaN(start.getTime())) return null;
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
 export async function syncCandidateAppointment(
   accessToken: string,
   candidate: Candidate,
@@ -179,7 +142,6 @@ export async function syncCandidateAppointment(
 ): Promise<SyncResult> {
   const { eventType, remindMinutes = [1440, 180] } = options;
   const calendarId = options.calendarId || "primary";
-
   const dateValue = eventType === "medical" ? candidate.medicalDate : candidate.flightDate;
 
   if (!dateValue) {
@@ -194,61 +156,59 @@ export async function syncCandidateAppointment(
   }
 
   const candidateFullName = `${candidate.firstName} ${candidate.lastName}`.trim();
+  const summary = eventType === "medical"
+    ? `🩺 فحص طبي: ${candidateFullName} (${candidate.id})`
+    : `✈️ موعد السفر: ${candidateFullName} (${candidate.id})`;
 
-  let summary = "";
-  let description = "";
-  let location = "";
+  // Keep personally sensitive candidate data out of the calendar event.
+  const description = eventType === "medical"
+    ? `موعد فحص طبي للمرشح.\nالمعرف: ${candidate.id}\nالتاريخ: ${dateValue}\nالحالة: ${candidate.medicalStatus || "مجدول"}`
+    : `موعد سفر للمرشح.\nالمعرف: ${candidate.id}\nالتاريخ: ${dateValue}\nالحالة: ${candidate.flightStatus || "تم الحجز"}`;
+  const location = eventType === "medical"
+    ? candidate.city || "مركز الفحص الطبي المعتمد"
+    : "مطار المغادرة / صالة الرحلات الدولية";
 
-  if (eventType === "medical") {
-    summary = `🩺 فحص طبي: ${candidateFullName} (${candidate.id})`;
-    description = [
-      `موعد فحص طبي للمرشح لدى وكالة الاستقدام:`,
-      `• الاسم: ${candidateFullName}`,
-      `• المعرف: ${candidate.id}`,
-      `• المهنة: ${candidate.job || "غير محدد"} - الجنسية: ${candidate.country || "غير محدد"}`,
-      `• رقم الجواز: ${candidate.passportNumber || "غير متوفر"}`,
-      `• رقم الهاتف: ${candidate.phone || "غير متوفر"}`,
-      `• حالة الفحص: ${candidate.medicalStatus || "مجدول"}`,
-      `• الكفيل/جهة العمل: ${candidate.sponsorName || "غير محدد"}`,
-      `• تم المزامنة تلقائياً من نظام إدارة الاستقدام.`
-    ].join("\n");
-    location = candidate.city || "مركز الفحص الطبي المعتمد";
-  } else {
-    summary = `✈️ موعد السفر/الرحلة: ${candidateFullName} (${candidate.id})`;
-    description = [
-      `موعد رحلة طيران وسفر المرشح:`,
-      `• الاسم: ${candidateFullName}`,
-      `• المعرف: ${candidate.id}`,
-      `• المهنة: ${candidate.job || "غير محدد"} - الوجهة: ${candidate.country || "غير محدد"}`,
-      `• رقم التذكرة/خط الطيران: ${candidate.flightTicketNumber || "مؤكد"}`,
-      `• حالة السفر: ${candidate.flightStatus || "تم الحجز"}`,
-      `• رقم الجواز: ${candidate.passportNumber || "غير متوفر"}`,
-      `• هاتف المرشح: ${candidate.phone || "غير متوفر"}`,
-      `• الكفيل/المستقدم: ${candidate.sponsorName || "غير محدد"}`,
-      `• تم المزامنة تلقائياً من نظام إدارة الاستقدام.`
-    ].join("\n");
-    location = "مطار المغادرة / صالة الرحلات الدولية";
-  }
-
-  // Construct start/end dates
   const nextDay = getNextDayDateString(dateValue);
+  const dateTimeRange = buildDateTimeRange(dateValue, options.timeString);
+
+  // Idempotency key: candidate + appointment type + date. Re-sync returns the existing event.
+  const existingEvents = await listCalendarEvents(
+    accessToken,
+    calendarId,
+    `${dateValue}T00:00:00.000Z`,
+    100,
+    `${nextDay}T00:00:00.000Z`
+  );
+  const existing = existingEvents.find(
+    (event) =>
+      event.extendedProperties?.private?.appSource === "recruitment_agency_system" &&
+      event.extendedProperties.private.candidateId === candidate.id &&
+      event.extendedProperties.private.appointmentType === eventType &&
+      event.extendedProperties.private.targetDate === dateValue
+  );
+
+  if (existing) {
+    return {
+      success: true,
+      eventId: existing.id,
+      eventLink: existing.htmlLink,
+      summary: existing.summary || summary,
+      date: dateValue,
+      candidateId: candidate.id,
+      eventType,
+      skippedExisting: true
+    };
+  }
 
   const eventPayload: GoogleCalendarEvent = {
     summary,
     description,
     location,
-    start: {
-      date: dateValue
-    },
-    end: {
-      date: nextDay
-    },
+    start: dateTimeRange ? { dateTime: dateTimeRange.start } : { date: dateValue },
+    end: dateTimeRange ? { dateTime: dateTimeRange.end } : { date: nextDay },
     reminders: {
       useDefault: false,
-      overrides: remindMinutes.map((mins) => ({
-        method: "popup",
-        minutes: mins
-      }))
+      overrides: remindMinutes.map((mins) => ({ method: "popup", minutes: mins }))
     },
     extendedProperties: {
       private: {
@@ -283,9 +243,6 @@ export async function syncCandidateAppointment(
   }
 }
 
-/**
- * Scans all candidates for valid medical and flight appointments and syncs them
- */
 export async function batchSyncAppointmentsToCalendar(
   accessToken: string,
   candidates: Candidate[],
@@ -297,29 +254,20 @@ export async function batchSyncAppointmentsToCalendar(
 ): Promise<SyncResult[]> {
   const { includeMedical = true, includeFlight = true, onProgress } = options;
   const results: SyncResult[] = [];
-
   const itemsToSync: Array<{ candidate: Candidate; type: "medical" | "flight" }> = [];
 
   for (const candidate of candidates) {
     if (candidate.archived) continue;
-
-    if (includeMedical && candidate.medicalDate) {
-      itemsToSync.push({ candidate, type: "medical" });
-    }
-    if (includeFlight && candidate.flightDate) {
-      itemsToSync.push({ candidate, type: "flight" });
-    }
+    if (includeMedical && candidate.medicalDate) itemsToSync.push({ candidate, type: "medical" });
+    if (includeFlight && candidate.flightDate) itemsToSync.push({ candidate, type: "flight" });
   }
 
   let completed = 0;
   for (const item of itemsToSync) {
-    const res = await syncCandidateAppointment(accessToken, item.candidate, {
-      eventType: item.type
-    });
+    const res = await syncCandidateAppointment(accessToken, item.candidate, { eventType: item.type });
     results.push(res);
     completed++;
     onProgress?.(completed, itemsToSync.length, res);
   }
-
   return results;
 }
