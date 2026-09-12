@@ -60,7 +60,7 @@ try {
   await assertSucceeds(getDoc(doc(owner.firestore(), "settings/owner-a")));
   await assertFails(getDoc(doc(other.firestore(), "settings/owner-a")));
   await assertFails(setDoc(doc(other.firestore(), "settings/owner-a"), { ownerUid: "owner-b" }));
-  await assertSucceeds(getDoc(doc(owner.firestore(), "admins/owner-a")));
+  await assertSucceeds(getDoc(doc(admin.firestore(), "admins/admin-a")));
   await assertFails(setDoc(doc(owner.firestore(), "admins/owner-b"), { role: "admin" }));
 
   const ownerStorage = owner.storage();
