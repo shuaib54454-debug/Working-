@@ -38,7 +38,10 @@ jobs:
       - name: 📦 Install project dependencies
         run: npm ci --legacy-peer-deps
 
+      - name: 🧪 Install Firebase Rules test dependencies
+        run: npm install --no-save @firebase/rules-unit-testing tsx
+
       - name: 🔥 Run Firebase Emulator Rules Tests
         run: |
           npx --yes firebase-tools@latest emulators:exec --only firestore,storage \
-            "npx --yes -p @firebase/rules-unit-testing -p tsx tsx scripts/firebase-rules.test.ts"
+            "./node_modules/.bin/tsx scripts/firebase-rules.test.ts"
