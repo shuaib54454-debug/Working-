@@ -21,19 +21,16 @@ export function getApiBaseUrl(): string {
     return envUrl.trim().replace(/\/$/, "");
   }
 
-  // 2. Native Android / iOS Capacitor or localhost origin
+  // 2. Native Android / iOS Capacitor
   const isCapacitor =
     Capacitor.isNativePlatform() ||
-    (typeof window !== "undefined" &&
-      (window.location.protocol === "capacitor:" ||
-        window.location.hostname === "localhost" ||
-        window.location.hostname === "127.0.0.1"));
+    (typeof window !== "undefined" && window.location.protocol === "capacitor:");
 
   if (isCapacitor) {
     return DEFAULT_PRODUCTION_BACKEND;
   }
 
-  // 3. Default for Web browser / PWA (same-origin relative path)
+  // 3. Default for Web browser / PWA / dev server (same-origin relative path)
   return "";
 }
 
@@ -82,6 +79,11 @@ export async function postJsonToApi<T = any>(
         }
       } catch {}
     }
+  }
+
+  // Fallback authorization header for guest or preview applet sessions
+  if (!headers["Authorization"]) {
+    headers["Authorization"] = "Bearer applet-agency-session";
   }
 
   const controller = new AbortController();

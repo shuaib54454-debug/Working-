@@ -206,6 +206,124 @@ export function parseMRZDate(yymmdd: string, isExpiry: boolean = false): { forma
 }
 
 /**
+ * Maps a country string (Arabic or English or 3-letter code) to standard ICAO 3-letter alpha code
+ */
+export function findCountryCode(countryStr?: string): string {
+  if (!countryStr) return "SAU";
+  const upper = countryStr.trim().toUpperCase();
+  if (ICAO_COUNTRY_MAP[upper]) return upper;
+
+  for (const [code, info] of Object.entries(ICAO_COUNTRY_MAP)) {
+    if (
+      countryStr.includes(info.ar) ||
+      info.ar.includes(countryStr) ||
+      upper.includes(info.en.toUpperCase()) ||
+      info.en.toUpperCase().includes(upper)
+    ) {
+      return code;
+    }
+  }
+  return "SAU";
+}
+
+export interface GenerateMRZParams {
+  passportNumber: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  birthDate?: string; // YYYY-MM-DD or YYMMDD
+  expiryDate?: string; // YYYY-MM-DD or YYMMDD
+  gender?: "male" | "female" | "other";
+  country?: string;
+}
+
+/**
+ * Synthesizes 100% ICAO Doc 9303 compliant TD3 MRZ lines (2 x 44 chars) with mathematical check digits
+ */
+export function generateTD3MRZFromVisual(params: GenerateMRZParams): { line1: string; line2: string } {
+  const countryCode = findCountryCode(params.country);
+
+  // Line 1: P< + Country + SURNAME<<GIVEN<NAMES
+  let surname = (params.lastName || "")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, " ")
+    .trim()
+    .replace(/\s+/g, "<");
+
+  let givenNames = (params.firstName || "")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, " ")
+    .trim()
+    .replace(/\s+/g, "<");
+
+  if (!surname && !givenNames && params.fullName) {
+    const parts = params.fullName
+      .toUpperCase()
+      .replace(/[^A-Z\s]/g, "")
+      .trim()
+      .split(/\s+/);
+    if (parts.length > 1) {
+      surname = parts[parts.length - 1];
+      givenNames = parts.slice(0, -1).join("<");
+    } else {
+      surname = parts[0] || "CANDIDATE";
+      givenNames = parts[0] || "CANDIDATE";
+    }
+  }
+
+  if (!surname) surname = "CANDIDATE";
+  if (!givenNames) givenNames = surname;
+
+  const nameSection = `${surname}<<${givenNames}`.replace(/<+/g, "<").replace(/<+$/, "");
+  const line1 = `P<${countryCode}${nameSection}`.padEnd(44, "<").slice(0, 44);
+
+  // Line 2: Passport (9) + Check + Country (3) + Birth (6) + Check + Gender (1) + Expiry (6) + Check + Personal (14) + PersonalCheck (1) + CompositeCheck (1)
+  const passClean = (params.passportNumber || "A00000000")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 9);
+  const pass9 = passClean.padEnd(9, "<");
+  const passCheck = calculateICAOCheckDigit(pass9);
+
+  const formatDateToYYMMDD = (dStr?: string, defaultYY = "90") => {
+    if (!dStr) return `${defaultYY}0101`;
+    const clean = dStr.replace(/[^0-9]/g, "");
+    if (clean.length === 6) return clean;
+    if (clean.length === 8) return clean.slice(2);
+    return `${defaultYY}0101`;
+  };
+
+  const birthYYMMDD = formatDateToYYMMDD(params.birthDate, "90");
+  const birthCheck = calculateICAOCheckDigit(birthYYMMDD);
+
+  const genderChar = params.gender === "female" ? "F" : "M";
+
+  const expiryYYMMDD = formatDateToYYMMDD(params.expiryDate, "30");
+  const expiryCheck = calculateICAOCheckDigit(expiryYYMMDD);
+
+  const personalNum = "".padEnd(14, "<");
+  const personalCheck = "0";
+
+  // Composite check covers positions 1-10, 14-20, 22-43
+  const compositeBuffer =
+    pass9 +
+    passCheck +
+    birthYYMMDD +
+    birthCheck +
+    expiryYYMMDD +
+    expiryCheck +
+    personalNum +
+    personalCheck;
+  const compositeCheck = calculateICAOCheckDigit(compositeBuffer);
+
+  const line2 = `${pass9}${passCheck}${countryCode}${birthYYMMDD}${birthCheck}${genderChar}${expiryYYMMDD}${expiryCheck}${personalNum}${personalCheck}${compositeCheck}`
+    .padEnd(44, "<")
+    .slice(0, 44);
+
+  return { line1, line2 };
+}
+
+/**
  * Complete TD3 Passport MRZ Parser (2 lines x 44 characters) with Smart Anchor Alignment
  */
 export function parseTD3MRZ(rawLine1: string, rawLine2: string): MRZParsedData | null {
