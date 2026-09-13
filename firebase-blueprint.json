@@ -56,6 +56,27 @@
         "nextId": { "type": "number", "description": "Next candidate ID sequence number" }
       },
       "required": ["ownerUid", "agencyName", "currency"]
+    },
+    "ActivityLogEntry": {
+      "title": "ActivityLogEntry",
+      "description": "Global activity and audit trail log tracking system operations across candidates and finances.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique log ID" },
+        "actionType": { "type": "string", "description": "Action type identifier" },
+        "category": { "type": "string", "description": "Category: STAGE, PAYMENT, EXPENSE, CANDIDATE, DOCUMENT, SETTINGS" },
+        "title": { "type": "string", "description": "Human readable log summary" },
+        "description": { "type": "string", "description": "Detailed log description" },
+        "timestamp": { "type": "number", "description": "Unix millisecond timestamp" },
+        "date": { "type": "string", "description": "ISO date string" },
+        "userEmail": { "type": "string", "description": "Actor user email" },
+        "userName": { "type": "string", "description": "Actor display name" },
+        "userUid": { "type": "string", "description": "Actor user UID" },
+        "candidateId": { "type": "string", "description": "Associated candidate ID if any" },
+        "candidateName": { "type": "string", "description": "Associated candidate full name if any" },
+        "amount": { "type": "number", "description": "Associated financial amount if any" }
+      },
+      "required": ["id", "actionType", "category", "title", "timestamp", "userEmail"]
     }
   },
   "firestore": {
@@ -70,6 +91,10 @@
     "/settings/{settingId}": {
       "schema": { "$ref": "#/entities/AgencySettings" },
       "description": "Agency settings and configuration document."
+    },
+    "/activities/{activityId}": {
+      "schema": { "$ref": "#/entities/ActivityLogEntry" },
+      "description": "Global activity and audit trail log collection for agency operations."
     }
   }
 }

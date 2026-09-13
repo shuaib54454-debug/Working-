@@ -67,6 +67,16 @@ export interface CandidateNoteEntry {
   referencedDocId?: string;
 }
 
+export interface CandidateStageHistoryEntry {
+  id: string;
+  fromStage?: StageId;
+  toStage: StageId;
+  date: string; // ISO 8601 string or formatted date
+  timestamp: number;
+  note?: string;
+  changedBy?: string;
+}
+
 export interface Candidate {
   id: string; // e.g. CAND-0001
   ownerUid?: string;
@@ -125,6 +135,7 @@ export interface Candidate {
   agentName?: string; // اسم الوسيط / المندوب
   sponsorName?: string; // اسم الكفيل / صاحب العمل
   contractDurationYears?: number;
+  stageHistory?: CandidateStageHistoryEntry[];
 }
 
 export interface AgencySettings {
@@ -151,4 +162,47 @@ export interface FinanceSummary {
   paymentProgress: number;
 }
 
-export type ActiveView = "dashboard" | "list" | "profile" | "add" | "finance" | "archive" | "settings";
+export type ActiveView = "dashboard" | "list" | "profile" | "add" | "finance" | "activity" | "archive" | "settings";
+
+export type ActivityActionType =
+  | "STAGE_CHANGE"
+  | "CANDIDATE_CREATED"
+  | "CANDIDATE_UPDATED"
+  | "CANDIDATE_ARCHIVED"
+  | "CANDIDATE_RESTORED"
+  | "CANDIDATE_DELETED"
+  | "PAYMENT_ADDED"
+  | "PAYMENT_DELETED"
+  | "EXPENSE_CANDIDATE_ADDED"
+  | "EXPENSE_CANDIDATE_DELETED"
+  | "EXPENSE_GENERAL_ADDED"
+  | "EXPENSE_GENERAL_DELETED"
+  | "DOCUMENT_UPLOADED"
+  | "DOCUMENT_DELETED"
+  | "NOTE_ADDED"
+  | "SETTINGS_UPDATED";
+
+export type ActivityCategory =
+  | "STAGE"
+  | "PAYMENT"
+  | "EXPENSE"
+  | "CANDIDATE"
+  | "DOCUMENT"
+  | "SETTINGS";
+
+export interface ActivityLogEntry {
+  id: string; // e.g. "ACT-2026-X8Y1"
+  actionType: ActivityActionType;
+  category: ActivityCategory;
+  title: string;
+  description: string;
+  timestamp: number; // Date.now()
+  date: string; // ISO string
+  userEmail: string;
+  userName?: string;
+  userUid?: string;
+  candidateId?: string;
+  candidateName?: string;
+  amount?: number;
+  metadata?: Record<string, any>;
+}

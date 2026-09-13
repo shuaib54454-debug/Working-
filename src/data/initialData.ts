@@ -3,7 +3,8 @@ import { Candidate, StageConfig, AgencySettings, GeneralExpense } from "../types
 export const STORAGE_KEYS = {
   candidates: "shuayb_rec_cands_v2",
   expenses: "shuayb_rec_exp_v2",
-  settings: "shuayb_rec_set_v2"
+  settings: "shuayb_rec_set_v2",
+  activities: "shuayb_rec_activities_v1"
 };
 
 export const STAGES: StageConfig[] = [

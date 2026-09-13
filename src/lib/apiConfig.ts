@@ -72,6 +72,16 @@ export async function postJsonToApi<T = any>(
     } catch (tokenErr) {
       console.warn("Could not retrieve Firebase ID token for API request:", tokenErr);
     }
+  } else if (typeof window !== "undefined") {
+    const localUserRaw = localStorage.getItem("shuayb_local_user");
+    if (localUserRaw) {
+      try {
+        const localUser = JSON.parse(localUserRaw);
+        if (localUser?.uid) {
+          headers["Authorization"] = `Bearer local-mode-user:${encodeURIComponent(localUser.uid)}:${encodeURIComponent(localUser.email || "")}`;
+        }
+      } catch {}
+    }
   }
 
   const controller = new AbortController();

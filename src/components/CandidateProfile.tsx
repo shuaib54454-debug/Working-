@@ -44,17 +44,19 @@ import {
   Check,
   FilePlus,
   Sparkles,
-  CalendarPlus
+  CalendarPlus,
+  History
 } from "lucide-react";
 import { getAccessToken, googleSignIn } from "../lib/googleAuth";
 import { syncCandidateAppointment } from "../lib/googleCalendar";
-import { Candidate, AgencySettings, StageId, PaymentRecord, CandidateExpense, WorkerDocumentRecord, CandidateNoteEntry } from "../types";
+import { Candidate, AgencySettings, StageId, PaymentRecord, CandidateExpense, WorkerDocumentRecord, CandidateNoteEntry, CandidateStageHistoryEntry } from "../types";
 import { STAGES, formatMoney, getTodayDateString, calculateCandidateFinance } from "../data/initialData";
 import { exportElementToPDF } from "../lib/pdfUtils";
 import { ReceiptData } from "./ReceiptModal";
 import { PassportScannerModal } from "./PassportScannerModal";
 import { uploadWorkerDocument, deleteWorkerDocument, WorkerStorageFolder } from "../lib/firebase";
 import { CandidateDocumentsAndNotes } from "./CandidateDocumentsAndNotes";
+import { CandidateStageChangelog } from "./CandidateStageChangelog";
 
 interface CandidateProfileProps {
   candidate: Candidate;
@@ -79,7 +81,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
   onPrintReceipt,
   onOpenCalendarModal
 }) => {
-  const [activeTab, setActiveTab] = useState<"INFO" | "STEPS" | "MONEY" | "DOCS">("INFO");
+  const [activeTab, setActiveTab] = useState<"INFO" | "STEPS" | "MONEY" | "DOCS" | "HISTORY">("INFO");
   const [showScannerModal, setShowScannerModal] = useState(false);
   
   // Payment Modal State
@@ -405,9 +407,20 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
     setShowAddExpenseModal(false);
   };
 
-  // Quick stage switcher
-  const handleStageChange = (newStage: StageId) => {
-    onUpdate(candidate.id, { stage: newStage });
+  // Quick stage switcher with history tracking
+  const handleStageChange = (newStage: StageId, note?: string) => {
+    if (newStage === candidate.stage) return;
+    const newEntry: CandidateStageHistoryEntry = {
+      id: "STG-" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase(),
+      fromStage: candidate.stage,
+      toStage: newStage,
+      date: new Date().toISOString(),
+      timestamp: Date.now(),
+      note: note,
+      changedBy: "مدير النظام"
+    };
+    const updatedHistory = [newEntry, ...(candidate.stageHistory || [])];
+    onUpdate(candidate.id, { stage: newStage, stageHistory: updatedHistory });
   };
 
   return (
@@ -616,6 +629,23 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
           >
             <FileText className="w-4 h-4" />
             الملاحظات والوثائق
+          </button>
+
+          <button
+            onClick={() => setActiveTab("HISTORY")}
+            className={`px-4 py-2 rounded-2xl text-xs font-black tracking-wider transition-all flex items-center gap-1.5 ${
+              activeTab === "HISTORY"
+                ? "bg-[#c9a84c] text-[#172a46] shadow-sm"
+                : "text-stone-300 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            <History className="w-4 h-4" />
+            سجل التغييرات
+            {candidate.stageHistory && candidate.stageHistory.length > 0 && (
+              <span className="bg-white/20 text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold">
+                {candidate.stageHistory.length}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -1399,6 +1429,16 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
           handleDeleteDocument={handleDeleteDocument}
           copiedDocId={copiedDocId}
           handleCopyDocId={handleCopyDocId}
+        />
+      )}
+
+      {/* =========================================================================
+          TAB 5: HISTORY & STAGE CHANGELOG (سجل التغييرات وتتبع مسار المراحل)
+      ========================================================================== */}
+      {activeTab === "HISTORY" && (
+        <CandidateStageChangelog
+          candidate={candidate}
+          onUpdate={onUpdate}
         />
       )}
 

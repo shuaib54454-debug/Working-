@@ -2,17 +2,22 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { User } from "firebase/auth";
 import {
   Candidate,
+  CandidateStageHistoryEntry,
   GeneralExpense,
   AgencySettings,
   ActiveView,
   StageId,
-  PaymentRecord
+  PaymentRecord,
+  ActivityLogEntry,
+  ActivityActionType,
+  ActivityCategory
 } from "./types";
 import {
   STORAGE_KEYS,
   INITIAL_CANDIDATES,
   INITIAL_EXPENSES,
   DEFAULT_SETTINGS,
+  STAGES,
   getTodayDateString,
   calculateCandidateFinance
 } from "./data/initialData";
@@ -31,6 +36,7 @@ import { EditCandidateModal } from "./components/EditCandidateModal";
 import { FinanceView } from "./components/FinanceView";
 import { ArchiveView } from "./components/ArchiveView";
 import { SettingsView } from "./components/SettingsView";
+import { GlobalActivityLog } from "./components/GlobalActivityLog";
 import { ReceiptModal, ReceiptData } from "./components/ReceiptModal";
 import { GoogleSheetsModal } from "./components/GoogleSheetsModal";
 import { GoogleCalendarModal } from "./components/GoogleCalendarModal";
@@ -52,8 +58,11 @@ import {
   syncAllExpensesBatch,
   subscribeToSettings,
   syncSettingsToCloud,
+  subscribeToActivities,
+  syncActivityToCloud,
   autoMigrateExistingDataToOwner
 } from "./lib/firebase";
+import { createActivityEntry, buildHistoricActivitiesFromData } from "./lib/activityLog";
 import { findCandidateDuplicates } from "./lib/candidateDuplicate";
 import { Capacitor } from "@capacitor/core";
 import { App as CapApp } from "@capacitor/app";
@@ -106,6 +115,19 @@ export default function App() {
     return DEFAULT_SETTINGS;
   });
 
+  const [activities, setActivities] = useState<ActivityLogEntry[]>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.activities);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error("Failed to load activities from storage", e);
+    }
+    return buildHistoricActivitiesFromData(INITIAL_CANDIDATES, INITIAL_EXPENSES);
+  });
+
   // Subscribe to Firebase Auth
   useEffect(() => {
     const unsubAuth = subscribeToAuth((user) => {
@@ -115,7 +137,7 @@ export default function App() {
     return () => unsubAuth();
   }, []);
 
-  // Real-time Cloud Sync with Firestore (scoped by currentUser.uid)
+  // Real-time Cloud Sync with Firestore (scoped by currentUser.uid for candidates/expenses/settings, global for activities)
   useEffect(() => {
     if (!currentUser) return;
     if ((currentUser as AppUser).isLocal) return;
@@ -150,12 +172,51 @@ export default function App() {
       }
     });
 
+    const unsubActivities = subscribeToActivities((cloudActivities) => {
+      if (cloudActivities && cloudActivities.length > 0) {
+        setActivities(cloudActivities);
+      }
+    });
+
     return () => {
       unsubCandidates();
       unsubExpenses();
       unsubSettings();
+      unsubActivities();
     };
   }, [currentUser]);
+
+  // Activity logger helper
+  const logActivity = (
+    actionType: ActivityActionType,
+    category: ActivityCategory,
+    title: string,
+    description: string,
+    options?: {
+      candidateId?: string;
+      candidateName?: string;
+      amount?: number;
+      metadata?: Record<string, any>;
+    }
+  ) => {
+    const email = currentUser?.email || "مدير النظام";
+    const newEntry = createActivityEntry(
+      actionType,
+      category,
+      title,
+      description,
+      email,
+      {
+        userName: currentUser?.displayName || undefined,
+        userUid: currentUser?.uid || undefined,
+        ...options
+      }
+    );
+    setActivities((prev) => [newEntry, ...prev.slice(0, 999)]);
+    syncActivityToCloud(newEntry).catch((err) => {
+      console.error("Cloud activity log sync error:", err);
+    });
+  };
 
   // 2. Navigation & Active Selection State
   const [currentView, setCurrentView] = useState<ActiveView>("dashboard");
@@ -181,10 +242,11 @@ export default function App() {
       localStorage.setItem(STORAGE_KEYS.candidates, JSON.stringify(candidates));
       localStorage.setItem(STORAGE_KEYS.expenses, JSON.stringify(generalExpenses));
       localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
+      localStorage.setItem(STORAGE_KEYS.activities, JSON.stringify(activities));
     } catch (e) {
       console.error("Error saving data to localStorage", e);
     }
-  }, [candidates, generalExpenses, settings]);
+  }, [candidates, generalExpenses, settings, activities]);
 
   // Capacitor Native Lifecycle & Android Hardware Back Button Handler
   useEffect(() => {
@@ -346,8 +408,34 @@ export default function App() {
       return updated;
     });
 
-    // If initial payment was made, show receipt modal
+    // Log candidate creation
+    const candFullName = `${newCandidate.firstName} ${newCandidate.lastName}`.trim();
+    logActivity(
+      "CANDIDATE_CREATED",
+      "CANDIDATE",
+      `تسجيل مرشح جديد: ${candFullName}`,
+      `تم تسجيل المرشح ${candFullName} برقم (${newCandidate.id}) في مهنة (${newCandidate.job || "غير محدد"}) وإجمالي رسوم ${newCandidate.totalFees}`,
+      {
+        candidateId: newCandidate.id,
+        candidateName: candFullName,
+        amount: newCandidate.totalFees
+      }
+    );
+
+    // If initial payment was made, log payment and show receipt modal
     if (payments.length > 0) {
+      logActivity(
+        "PAYMENT_ADDED",
+        "PAYMENT",
+        `قبض دفعة تسجيل أولى: ${candFullName}`,
+        `تم استلام دفعة أولية بقيمة ${payments[0].amount} عبر (${payments[0].method || "كاش"}) بسند رقم (${payments[0].receiptNumber})`,
+        {
+          candidateId: newCandidate.id,
+          candidateName: candFullName,
+          amount: payments[0].amount
+        }
+      );
+
       setReceiptModalData({
         type: "PAYMENT",
         receiptNumber: payments[0].receiptNumber || "REC-001",
@@ -372,7 +460,83 @@ export default function App() {
     setCandidates(prev => {
       const updatedList = prev.map(c => {
         if (c.id === id) {
-          const updatedCand = { ...c, ...updates, ownerUid: uid };
+          let stageHistory = updates.stageHistory || c.stageHistory || [];
+          const candName = `${c.firstName} ${c.lastName}`.trim();
+
+          // Check if stage changed
+          if (updates.stage && updates.stage !== c.stage && !updates.stageHistory) {
+            const fromLabel = STAGES.find(s => s.id === c.stage)?.label || c.stage;
+            const toLabel = STAGES.find(s => s.id === updates.stage)?.label || updates.stage;
+            const newEntry: CandidateStageHistoryEntry = {
+              id: "STG-" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase(),
+              fromStage: c.stage,
+              toStage: updates.stage,
+              date: new Date().toISOString(),
+              timestamp: Date.now(),
+              changedBy: currentUser?.email || "مدير النظام"
+            };
+            stageHistory = [newEntry, ...stageHistory];
+
+            logActivity(
+              "STAGE_CHANGE",
+              "STAGE",
+              `تغيير مرحلة: ${candName} إلى ${toLabel}`,
+              `تم تغيير مرحلة المرشح ${candName} من [${fromLabel}] إلى [${toLabel}]`,
+              {
+                candidateId: c.id,
+                candidateName: candName
+              }
+            );
+          }
+
+          // Check if payment was added
+          if (updates.payments && updates.payments.length > (c.payments?.length || 0)) {
+            const addedPay = updates.payments[updates.payments.length - 1];
+            logActivity(
+              "PAYMENT_ADDED",
+              "PAYMENT",
+              `سند قبض جديد: ${candName}`,
+              `تم استلام مبلغ ${addedPay.amount} عبر (${addedPay.method || "كاش"})${addedPay.receiptNumber ? ` بسند رقم ${addedPay.receiptNumber}` : ""}${addedPay.note ? ` - ${addedPay.note}` : ""}`,
+              {
+                candidateId: c.id,
+                candidateName: candName,
+                amount: addedPay.amount
+              }
+            );
+          }
+
+          // Check if expense on candidate was added
+          if (updates.expenses && updates.expenses.length > (c.expenses?.length || 0)) {
+            const addedExp = updates.expenses[updates.expenses.length - 1];
+            logActivity(
+              "EXPENSE_CANDIDATE_ADDED",
+              "EXPENSE",
+              `مصروف على المرشح: ${candName} (${addedExp.category})`,
+              `تم تسجيل مصروف بقيمة ${addedExp.amount} لتغطية (${addedExp.category})${addedExp.note ? ` - ${addedExp.note}` : ""}`,
+              {
+                candidateId: c.id,
+                candidateName: candName,
+                amount: addedExp.amount
+              }
+            );
+          }
+
+          // Check if note was added
+          if (updates.noteEntries && updates.noteEntries.length > (c.noteEntries?.length || 0)) {
+            const addedNote = updates.noteEntries[updates.noteEntries.length - 1];
+            logActivity(
+              "NOTE_ADDED",
+              "DOCUMENT",
+              `إضافة ملاحظة: ${candName}`,
+              `تمت كتابة ملاحظة توثيقية: "${addedNote.text.slice(0, 70)}${addedNote.text.length > 70 ? "..." : ""}"`,
+              {
+                candidateId: c.id,
+                candidateName: candName
+              }
+            );
+          }
+
+          const updatedCand = { ...c, ...updates, stageHistory, ownerUid: uid };
           if (uid) syncCandidateToCloud(updatedCand, uid);
           return updatedCand;
         }
@@ -387,8 +551,16 @@ export default function App() {
     setCandidates(prev => {
       const updatedList = prev.map(c => {
         if (c.id === id) {
+          const candName = `${c.firstName} ${c.lastName}`.trim();
           const archived = { ...c, archived: true, ownerUid: uid };
           if (uid) syncCandidateToCloud(archived, uid);
+          logActivity(
+            "CANDIDATE_ARCHIVED",
+            "CANDIDATE",
+            `أرشفة ملف المرشح: ${candName}`,
+            `تم نقل ملف المرشح ${candName} إلى الأرشيف النهائي`,
+            { candidateId: c.id, candidateName: candName }
+          );
           return archived;
         }
         return c;
@@ -403,8 +575,16 @@ export default function App() {
     setCandidates(prev => {
       const updatedList = prev.map(c => {
         if (c.id === id) {
+          const candName = `${c.firstName} ${c.lastName}`.trim();
           const restored = { ...c, archived: false, ownerUid: uid };
           if (uid) syncCandidateToCloud(restored, uid);
+          logActivity(
+            "CANDIDATE_RESTORED",
+            "CANDIDATE",
+            `استعادة ملف المرشح: ${candName}`,
+            `تمت استعادة المرشح ${candName} من الأرشيف إلى قائمة التشغيل الفعالة`,
+            { candidateId: c.id, candidateName: candName }
+          );
           return restored;
         }
         return c;
@@ -414,6 +594,9 @@ export default function App() {
   };
 
   const handlePermanentDeleteCandidate = (id: string) => {
+    const target = candidates.find(c => c.id === id);
+    const candName = target ? `${target.firstName} ${target.lastName}`.trim() : id;
+
     setCandidates(prev => {
       const next = prev.filter(c => c.id !== id);
       try {
@@ -427,6 +610,14 @@ export default function App() {
       setActiveCandidateId(null);
     }
     deleteCandidateFromCloud(id);
+
+    logActivity(
+      "CANDIDATE_DELETED",
+      "CANDIDATE",
+      `حذف نهائي لمرشح: ${candName}`,
+      `تم حذف ملف المرشح (${candName}) برقم ${id} بشكل نهائي من قاعدة البيانات`,
+      { candidateId: id, candidateName: candName }
+    );
   };
 
   const handleBulkArchiveCandidates = (ids: string[]) => {
@@ -484,12 +675,35 @@ export default function App() {
     };
     setGeneralExpenses(prev => [newExp, ...prev]);
     if (uid) syncExpenseToCloud(newExp, uid);
+
+    logActivity(
+      "EXPENSE_GENERAL_ADDED",
+      "EXPENSE",
+      `مصروف تشغيلي عام: ${newExp.title}`,
+      `تم تسجيل مصروف تشغيلي عام بقيمة ${newExp.amount} في بند (${newExp.category})${newExp.note ? ` - ${newExp.note}` : ""}`,
+      {
+        amount: newExp.amount
+      }
+    );
   };
 
   const handleDeleteGeneralExpense = (id: string | number) => {
     const stringId = String(id);
+    const target = generalExpenses.find(e => String(e.id) === stringId);
     setGeneralExpenses(prev => prev.filter(e => String(e.id) !== stringId));
     deleteExpenseFromCloud(stringId);
+
+    if (target) {
+      logActivity(
+        "EXPENSE_GENERAL_DELETED",
+        "EXPENSE",
+        `حذف مصروف عام: ${target.title}`,
+        `تم إلغاء أو حذف المصروف العام المسجل بقيمة ${target.amount} (${target.category})`,
+        {
+          amount: target.amount
+        }
+      );
+    }
   };
 
   const handleSaveSettings = (newSettings: AgencySettings) => {
@@ -497,6 +711,13 @@ export default function App() {
     const updated = { ...newSettings, ownerUid: uid };
     setSettings(updated);
     if (uid) syncSettingsToCloud(updated, uid);
+
+    logActivity(
+      "SETTINGS_UPDATED",
+      "SETTINGS",
+      "تحديث إعدادات الوكالة",
+      `تم تعديل إعدادات الوكالة الرسمية (الاسم: ${newSettings.agencyName || "غير محدد"} - العملة: ${newSettings.currency})`
+    );
   };
 
   const handleRestoreAllData = (data: {
@@ -697,6 +918,26 @@ export default function App() {
             onOpenExportModal={(tab) => {
               setExportDefaultTab(tab || "FINANCE");
               setShowExportModal(true);
+            }}
+          />
+        )}
+
+        {currentView === "activity" && (
+          <GlobalActivityLog
+            activities={activities}
+            settings={settings}
+            currentUserEmail={currentUser?.email}
+            onSelectCandidate={id => {
+              setActiveCandidateId(id);
+              setCurrentView("profile");
+            }}
+            onRefresh={() => {
+              const stored = localStorage.getItem(STORAGE_KEYS.activities);
+              if (stored) {
+                try {
+                  setActivities(JSON.parse(stored));
+                } catch (e) {}
+              }
             }}
           />
         )}

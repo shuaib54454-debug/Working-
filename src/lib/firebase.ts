@@ -35,7 +35,7 @@ import {
   deleteObject
 } from "firebase/storage";
 import firebaseConfig from "../../firebase-applet-config.json";
-import { Candidate, GeneralExpense, AgencySettings } from "../types";
+import { Candidate, GeneralExpense, AgencySettings, ActivityLogEntry } from "../types";
 import { compressImage } from "./imageUtils";
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -468,6 +468,63 @@ export async function syncSettingsToCloud(settings: AgencySettings, ownerUid?: s
     });
   } catch (e) {
     handleFirestoreError(e, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeToActivities(
+  onUpdate: (activities: ActivityLogEntry[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const q = collection(db, "activities");
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: ActivityLogEntry[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as ActivityLogEntry);
+      });
+      // Sort newest first
+      list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      onUpdate(list);
+    },
+    (error) => {
+      const msg = error?.message || "";
+      if (msg.includes("Database is closing") || msg.includes("Database is closing/hidden")) {
+        console.warn("Activities snapshot paused due to temporary database closing/hidden state");
+        return;
+      }
+      handleFirestoreError(error, OperationType.LIST, "activities");
+      onError?.(error);
+    }
+  );
+}
+
+export async function syncActivityToCloud(entry: ActivityLogEntry): Promise<void> {
+  if (!auth.currentUser) return;
+  const path = `activities/${entry.id}`;
+  try {
+    await withDbRetry(async () => {
+      await setDoc(doc(db, "activities", entry.id), entry, { merge: true });
+    });
+  } catch (e) {
+    handleFirestoreError(e, OperationType.WRITE, path);
+  }
+}
+
+export async function syncActivitiesBatchToCloud(entries: ActivityLogEntry[]): Promise<void> {
+  try {
+    if (!auth.currentUser || entries.length === 0) return;
+    await withDbRetry(async () => {
+      const batch = writeBatch(db);
+      // Limit to 450 per batch (Firestore batch limit is 500)
+      const sliced = entries.slice(0, 450);
+      sliced.forEach((item) => {
+        batch.set(doc(db, "activities", item.id), item, { merge: true });
+      });
+      await batch.commit();
+    });
+  } catch (e) {
+    handleFirestoreError(e, OperationType.WRITE, "activities/batch");
   }
 }
 

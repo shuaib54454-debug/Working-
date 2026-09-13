@@ -25,7 +25,8 @@ import {
   CheckCircle2,
   Cloud,
   Layers,
-  Calendar
+  Calendar,
+  Activity
 } from "lucide-react";
 import { ActiveView, AgencySettings } from "../types";
 import { useLanguage } from "../lib/LanguageContext";
@@ -133,6 +134,18 @@ export const TopBar: React.FC<
           >
             <Wallet className="w-4 h-4" />
             {t.finance}
+          </button>
+
+          <button
+            onClick={() => onNavigate("activity")}
+            className={`px-3.5 py-2 rounded-2xl text-sm font-bold transition-all flex items-center gap-2 ${
+              currentView === "activity"
+                ? "bg-[#c9a84c] text-[#172a46] shadow-sm font-black"
+                : "text-stone-200 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            <Activity className="w-4 h-4" />
+            {t.activityLog}
           </button>
 
           <button
@@ -550,6 +563,25 @@ export const MobileQuickActionsSheet: React.FC<{
               {isAr ? "المرشحون المكتمل سفرهم" : "Completed candidates"}
             </span>
           </button>
+
+          {/* Action 7: Global Activity Log */}
+          <button
+            onClick={() => {
+              onClose();
+              onNavigate("activity");
+            }}
+            className="flex flex-col items-start p-3.5 rounded-2xl bg-stone-50 hover:bg-teal-50 border border-stone-200 hover:border-teal-300 text-right transition-all active:scale-95 group col-span-2"
+          >
+            <div className="w-9 h-9 rounded-xl bg-[#172a46] text-[#c9a84c] flex items-center justify-center mb-2 shadow-xs group-hover:scale-105 transition-transform">
+              <Activity className="w-5 h-5" />
+            </div>
+            <span className="font-extrabold text-xs text-[#172a46]">
+              {isAr ? "سجل النشاط العام والرقابة" : "Global Activity & Audit Log"}
+            </span>
+            <span className="text-[10px] text-stone-400 mt-0.5">
+              {isAr ? "تتبع كافة التحركات والمراحل والعمليات المالية" : "Track all candidate moves & financial logs"}
+            </span>
+          </button>
         </div>
 
         {/* Close Button */}
@@ -687,6 +719,21 @@ export const MobileDrawer: React.FC<{
               <div className="flex items-center gap-2.5">
                 <Wallet className="w-4 h-4" />
                 <span>{t.finance}</span>
+              </div>
+              <ArrowIcon className="w-4 h-4 opacity-50" />
+            </button>
+
+            <button
+              onClick={() => handleNav("activity")}
+              className={`w-full flex items-center justify-between p-3 rounded-2xl text-xs font-bold transition-all ${
+                currentView === "activity"
+                  ? "bg-[#c9a84c] text-[#172a46] font-black"
+                  : "text-stone-200 hover:bg-white/10"
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Activity className="w-4 h-4" />
+                <span>{t.activityLog}</span>
               </div>
               <ArrowIcon className="w-4 h-4 opacity-50" />
             </button>
