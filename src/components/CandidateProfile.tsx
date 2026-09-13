@@ -54,6 +54,7 @@ import { STAGES, formatMoney, getTodayDateString, calculateCandidateFinance } fr
 import { exportElementToPDF } from "../lib/pdfUtils";
 import { ReceiptData } from "./ReceiptModal";
 import { PassportScannerModal } from "./PassportScannerModal";
+import { CandidateIdCardModal } from "./CandidateIdCardModal";
 import { uploadWorkerDocument, deleteWorkerDocument, WorkerStorageFolder } from "../lib/firebase";
 import { CandidateDocumentsAndNotes } from "./CandidateDocumentsAndNotes";
 import { CandidateStageChangelog } from "./CandidateStageChangelog";
@@ -83,6 +84,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<"INFO" | "STEPS" | "MONEY" | "DOCS" | "HISTORY">("INFO");
   const [showScannerModal, setShowScannerModal] = useState(false);
+  const [showIdCardModal, setShowIdCardModal] = useState(false);
   
   // Payment Modal State
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
@@ -498,6 +500,18 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               <span>تعديل البيانات</span>
             </button>
 
+            {/* Generate Professional Doctor ID Card Button */}
+            <button
+              id="btn-generate-id-card"
+              type="button"
+              onClick={() => setShowIdCardModal(true)}
+              title="إنشاء بطاقة الهوية المهنية للطبيب (CR80 Standard)"
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-2xl text-xs font-black shadow-sm transition-transform active:scale-95 border border-emerald-400/30"
+            >
+              <CreditCard className="w-3.5 h-3.5 text-white" />
+              <span>إنشاء بطاقة الهوية</span>
+            </button>
+
             {onOpenCalendarModal && (
               <button
                 onClick={onOpenCalendarModal}
@@ -910,6 +924,32 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                 <span className="text-[11px] text-stone-500 block mt-0.5">مدة العقد: {candidate.contractDurationYears || 2} سنوات</span>
               </div>
             </div>
+          </div>
+
+          {/* Doctor ID Card Quick Action Card */}
+          <div className="bg-gradient-to-r from-[#172a46] to-[#203a60] p-6 rounded-3xl text-white shadow-md flex flex-col sm:flex-row items-center justify-between gap-4 md:col-span-2">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-[#c9a84c] text-[#172a46] flex items-center justify-center font-black shadow-md shrink-0">
+                <CreditCard className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-black text-sm sm:text-base text-white flex items-center gap-2">
+                  <span>بطاقة تعريف طبيب القياسية (CR80 Standard ID Card)</span>
+                  <span className="text-[10px] bg-white/20 text-[#c9a84c] px-2 py-0.5 rounded-full font-mono">85.6 × 54 mm</span>
+                </h3>
+                <p className="text-xs text-stone-300 mt-1">
+                  تضمين بيانات الطبيب، الصورة الشخصية، رقم الجواز، شهادة الكفاءة (COC)، وحالة الفحص الطبي مع رمز التحقق الذكي والطباعة المباشرة.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowIdCardModal(true)}
+              className="px-5 py-2.5 bg-[#c9a84c] hover:bg-[#d8b759] active:scale-95 text-[#172a46] rounded-xl font-black text-xs shadow-md flex items-center gap-2 transition-all whitespace-nowrap self-stretch sm:self-auto justify-center"
+            >
+              <Printer className="w-4 h-4" />
+              <span>معاينة وطباعة بطاقة الهوية</span>
+            </button>
           </div>
         </div>
       )}
@@ -1755,6 +1795,14 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
             job: data.job || candidate.job
           });
         }}
+      />
+
+      {/* Candidate Professional Doctor ID Card Modal (CR80) */}
+      <CandidateIdCardModal
+        candidate={candidate}
+        settings={settings}
+        isOpen={showIdCardModal}
+        onClose={() => setShowIdCardModal(false)}
       />
     </div>
   );

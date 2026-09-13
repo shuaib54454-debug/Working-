@@ -70,6 +70,35 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState(false);
   const [copiedDomain, setCopiedDomain] = useState(false);
+  const [apiDisabledInfo, setApiDisabledInfo] = useState<{
+    url: string;
+    projectId: string;
+    actionLabel: string;
+    onRetry?: () => void;
+  } | null>(null);
+
+  // Helper to detect Google Sheets API not enabled in Google Cloud Console
+  const checkAndHandleApiDisabled = (err: any, actionLabel: string, retryFn?: () => void) => {
+    const raw = String(err?.message || err || "");
+    if (
+      raw.includes("Google Sheets API has not been used") ||
+      raw.includes("sheets.googleapis.com") ||
+      (raw.toLowerCase().includes("sheets") && raw.toLowerCase().includes("disabled"))
+    ) {
+      const matchUrl = raw.match(/https:\/\/[^\s]+/);
+      const url = matchUrl
+        ? matchUrl[0].replace(/[.,)\]]+$/, "")
+        : "https://console.developers.google.com/apis/api/sheets.googleapis.com/overview?project=879425467641";
+      setApiDisabledInfo({
+        url,
+        projectId: "879425467641",
+        actionLabel,
+        onRetry: retryFn
+      });
+      return true;
+    }
+    return false;
+  };
 
   // Sheets state
   const [activeTab, setActiveTab] = useState<"sync" | "create" | "existing" | "import" | "direct">("sync");
@@ -143,8 +172,14 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
       const files = await listUserSpreadsheets(token);
       setDriveFiles(files);
     } catch (err: any) {
-      console.error("Error fetching spreadsheets:", err);
-      setErrorMsg(err.message || "تعذر جلب ملفات Google Sheets من Drive");
+      const handled = checkAndHandleApiDisabled(err, "جلب ملفات Google Sheets", () => fetchDriveFiles());
+      if (handled) {
+        console.warn("Google Sheets API disabled on Cloud project. Prompted user with enable link.");
+        setErrorMsg(null);
+      } else {
+        console.error("Error fetching spreadsheets:", err);
+        setErrorMsg(err.message || "تعذر جلب ملفات Google Sheets من Drive");
+      }
     } finally {
       setLoadingFiles(false);
     }
@@ -231,8 +266,14 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
       setSuccessMsg(`تم إنشاء جدول البيانات بنجاح وتصدير ${candidates.length} مرشح والبيانات المالية!`);
       setActiveTab("sync");
     } catch (err: any) {
-      console.error("Create sheet error:", err);
-      setErrorMsg(err.message || "حدث خطأ أثناء إنشاء جدول البيانات في Google Drive");
+      const handled = checkAndHandleApiDisabled(err, "إنشاء جدول البيانات", () => handleCreateNewSheet());
+      if (handled) {
+        console.warn("Google Sheets API not yet enabled on Cloud project 879425467641. Prompted user with enable link.");
+        setErrorMsg(null);
+      } else {
+        console.error("Create sheet error:", err);
+        setErrorMsg(err.message || "حدث خطأ أثناء إنشاء جدول البيانات في Google Drive");
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -280,8 +321,14 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
       setSuccessMsg("تمت مزامنة وتحديث جدول Google Sheets بنجاح!");
       setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err: any) {
-      console.error("Sync error:", err);
-      setErrorMsg(err.message || "فشل تحديث جدول Google Sheets");
+      const handled = checkAndHandleApiDisabled(err, "مزامنة جدول البيانات", () => executeSyncToSheet());
+      if (handled) {
+        console.warn("Google Sheets API disabled on Cloud project. Prompted user with enable link.");
+        setErrorMsg(null);
+      } else {
+        console.error("Sync error:", err);
+        setErrorMsg(err.message || "فشل تحديث جدول Google Sheets");
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -312,8 +359,14 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
         setSuccessMsg(`تم العثور على ${list.length} مرشح جاهز للاستيراد.`);
       }
     } catch (err: any) {
-      console.error("Import error:", err);
-      setErrorMsg(err.message || "حدث خطأ أثناء قراءة الجدول من Google Sheets");
+      const handled = checkAndHandleApiDisabled(err, "استيراد المرشحين", () => handleLoadImportPreview());
+      if (handled) {
+        console.warn("Google Sheets API disabled on Cloud project. Prompted user with enable link.");
+        setErrorMsg(null);
+      } else {
+        console.error("Import error:", err);
+        setErrorMsg(err.message || "حدث خطأ أثناء قراءة الجدول من Google Sheets");
+      }
     } finally {
       setLoadingImport(false);
     }
@@ -451,6 +504,109 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
         )}
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+          {/* Google Sheets API Enablement Action Card */}
+          {apiDisabledInfo && (
+            <div className="bg-sky-50 border-2 border-sky-300 rounded-2xl p-5 space-y-4 shadow-sm animate-in fade-in">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5 text-sky-950 font-black text-sm">
+                  <div className="w-8 h-8 rounded-xl bg-sky-200/80 flex items-center justify-center shrink-0 text-sky-700">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span>تفعيل خدمة Google Sheets API مطلوب لمشروع Google Cloud</span>
+                    <span className="block text-[11px] font-normal text-sky-800 mt-0.5">
+                      المشروع رقم: <code className="font-mono font-bold text-sky-900 bg-sky-100 px-1.5 py-0.5 rounded">{apiDisabledInfo.projectId}</code>
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setApiDisabledInfo(null)}
+                  className="text-stone-400 hover:text-stone-700 text-xs font-bold p-1"
+                  title="إغلاق التنبيه"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className="text-xs text-sky-900 leading-relaxed font-medium">
+                لحفظ وتحديث جداول البيانات تلقائياً في Google Drive، يجب النقر على زر التفعيل مرة واحدة فقط في وحدة تحكم Google Cloud Console التابعة للمشروع:
+              </p>
+
+              {/* Direct Link Button */}
+              <div className="flex flex-wrap items-center gap-3">
+                <a
+                  href={apiDisabledInfo.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-sm transition-all"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>فتح صفحة تفعيل Google Sheets API في Google Cloud Console ↗</span>
+                </a>
+
+                {apiDisabledInfo.onRetry && (
+                  <button
+                    onClick={() => {
+                      if (apiDisabledInfo.onRetry) {
+                        apiDisabledInfo.onRetry();
+                      }
+                    }}
+                    disabled={isProcessing}
+                    className="px-4 py-2.5 bg-[#172a46] hover:bg-[#243e65] active:scale-95 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? "animate-spin" : ""}`} />
+                    <span>إعادة المحاولة الآن</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Simple Step by Step Instructions */}
+              <div className="text-[11px] text-sky-900 space-y-1.5 bg-sky-100/70 p-3 rounded-xl font-bold">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-full bg-sky-700 text-white flex items-center justify-center text-[10px] shrink-0">1</span>
+                  <span>اضغط الزر الأزرق أعلاه للانتقال إلى صفحة الخدمة في Google Cloud Console.</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-full bg-sky-700 text-white flex items-center justify-center text-[10px] shrink-0">2</span>
+                  <span>اضغط زر <b>"Enable" (تفعيل)</b> الأزرق الموجود بأعلى الصفحة.</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-full bg-sky-700 text-white flex items-center justify-center text-[10px] shrink-0">3</span>
+                  <span>انتظر دقيقة إلى دقيقتين لانتشار التفعيل عبر خوادم Google، ثم اضغط <b>"إعادة المحاولة الآن"</b>.</span>
+                </div>
+              </div>
+
+              {/* Alternative Immediate Export */}
+              <div className="pt-2 border-t border-sky-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-xs text-sky-950 font-bold">
+                  هل تريد تنزيل بياناتك فوراً بدون انتظار التفعيل؟
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => exportCandidatesToCSV(candidates, settings)}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 transition-all"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>تنزيل المرشحين Excel</span>
+                  </button>
+                  <button
+                    onClick={() => exportFinanceToCSV(candidates, generalExpenses, settings)}
+                    className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 active:scale-95 text-white rounded-xl font-bold text-xs shadow-xs flex items-center gap-1.5 transition-all"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>تنزيل المالية Excel</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("direct")}
+                    className="px-3 py-1.5 bg-white hover:bg-sky-100 text-[#172a46] border border-sky-300 rounded-xl font-black text-xs shadow-xs"
+                  >
+                    ⚡ المزيد من خيارات التصدير
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Unauthorized Domain Helper Card */}
           {isUnauthorizedDomain && (
             <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 space-y-3 animate-in fade-in">

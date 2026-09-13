@@ -363,3 +363,77 @@ export function exportSingleCandidateDirectPDF(candidate: Candidate, settings: A
   doc.save(`Worker-${candidate.id}-${candidate.firstName}-${today}.pdf`);
   return true;
 }
+
+/**
+ * Export CR80 Card (85.6mm x 54mm) directly to high-resolution vector/raster PDF
+ * Strict CR80 specification with zero margins, suitable for standard plastic card printers
+ */
+export async function exportCR80CardToPDF(
+  frontElement: HTMLElement | null,
+  backElement: HTMLElement | null,
+  options: {
+    filename?: string;
+    includeBack?: boolean;
+    side?: "both" | "front" | "back";
+  } = {}
+): Promise<boolean> {
+  try {
+    const {
+      filename = `Doctor-ID-Card-${new Date().toISOString().slice(0, 10)}.pdf`,
+      side = "both"
+    } = options;
+
+    const doc = new jsPDF({
+      orientation: "landscape",
+      unit: "mm",
+      format: [54, 85.6]
+    });
+
+    let hasPage = false;
+
+    // Helper to capture element cleanly
+    const captureElement = async (el: HTMLElement) => {
+      try {
+        const canvas = await html2canvasPro(el, {
+          scale: 3.5, // 300+ DPI target
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: "#ffffff",
+          logging: false
+        });
+        return canvas.toDataURL("image/png", 1.0);
+      } catch {
+        return await toPng(el, { pixelRatio: 3.5, backgroundColor: "#ffffff" });
+      }
+    };
+
+    // Render Front Side
+    if ((side === "both" || side === "front") && frontElement) {
+      const frontDataUrl = await captureElement(frontElement);
+      doc.addImage(frontDataUrl, "PNG", 0, 0, 85.6, 54, undefined, "FAST");
+      hasPage = true;
+    }
+
+    // Render Back Side
+    if ((side === "both" || side === "back") && backElement) {
+      if (hasPage) {
+        doc.addPage([54, 85.6], "landscape");
+      }
+      const backDataUrl = await captureElement(backElement);
+      doc.addImage(backDataUrl, "PNG", 0, 0, 85.6, 54, undefined, "FAST");
+      hasPage = true;
+    }
+
+    if (!hasPage) {
+      console.error("No valid card element found to export to PDF");
+      return false;
+    }
+
+    doc.save(filename);
+    return true;
+  } catch (err) {
+    console.error("Failed to export CR80 card to PDF:", err);
+    return false;
+  }
+}
+

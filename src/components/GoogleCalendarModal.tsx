@@ -72,6 +72,30 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [syncedEvents, setSyncedEvents] = useState<Record<string, { eventId: string; eventLink?: string }>>({});
+  const [apiDisabledInfo, setApiDisabledInfo] = useState<{
+    url: string;
+    projectId: string;
+  } | null>(null);
+
+  // Helper to detect Calendar API disabled
+  const checkCalendarApiDisabled = (errText: string) => {
+    if (
+      errText.includes("Calendar API has not been used") ||
+      errText.includes("calendar-json.googleapis.com") ||
+      (errText.toLowerCase().includes("calendar") && errText.toLowerCase().includes("disabled"))
+    ) {
+      const matchUrl = errText.match(/https:\/\/[^\s]+/);
+      const url = matchUrl
+        ? matchUrl[0].replace(/[.,)\]]+$/, "")
+        : "https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=879425467641";
+      setApiDisabledInfo({
+        url,
+        projectId: "879425467641"
+      });
+      return true;
+    }
+    return false;
+  };
 
   // Quick schedule form state
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
@@ -259,17 +283,31 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
             : `Appointment synced to Google Calendar for ${item.candidate.firstName}!`
         });
       } else {
-        setStatusMsg({
-          type: "error",
-          text: res.error || (isAr ? "فشلت المزامنة مع تقويم Google" : "Failed to sync appointment")
-        });
+        const errorText = res.error || "";
+        const isApiDisabled = checkCalendarApiDisabled(errorText);
+        if (isApiDisabled) {
+          console.warn("Google Calendar API disabled on Cloud project. Prompted user with enable link.");
+          setStatusMsg(null);
+        } else {
+          setStatusMsg({
+            type: "error",
+            text: errorText || (isAr ? "فشلت المزامنة مع تقويم Google" : "Failed to sync appointment")
+          });
+        }
       }
     } catch (err: any) {
-      console.error("Sync error:", err);
-      setStatusMsg({
-        type: "error",
-        text: err.message || (isAr ? "حدث خطأ أثناء المزامنة" : "Sync error occurred")
-      });
+      const errorText = err.message || "";
+      const isApiDisabled = checkCalendarApiDisabled(errorText);
+      if (isApiDisabled) {
+        console.warn("Google Calendar API disabled on Cloud project. Prompted user with enable link.");
+        setStatusMsg(null);
+      } else {
+        console.error("Sync error:", err);
+        setStatusMsg({
+          type: "error",
+          text: errorText || (isAr ? "حدث خطأ أثناء المزامنة" : "Sync error occurred")
+        });
+      }
     } finally {
       setSyncingItemId(null);
     }
@@ -332,11 +370,18 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
           : `Sync complete: Successfully scheduled ${successCount} of ${results.length} appointments to Google Calendar!`
       });
     } catch (err: any) {
-      console.error("Batch sync error:", err);
-      setStatusMsg({
-        type: "error",
-        text: err.message || (isAr ? "حدث خطأ أثناء المزامنة الجماعية" : "Batch sync failed")
-      });
+      const errorText = err.message || "";
+      const isApiDisabled = checkCalendarApiDisabled(errorText);
+      if (isApiDisabled) {
+        console.warn("Google Calendar API disabled on Cloud project. Prompted user with enable link.");
+        setStatusMsg(null);
+      } else {
+        console.error("Batch sync error:", err);
+        setStatusMsg({
+          type: "error",
+          text: errorText || (isAr ? "حدث خطأ أثناء المزامنة الجماعية" : "Batch sync failed")
+        });
+      }
     } finally {
       setBatchSyncing(false);
       setBatchProgress(null);
@@ -545,6 +590,38 @@ export const GoogleCalendarModal: React.FC<GoogleCalendarModalProps> = ({
             >
               <X className="w-3.5 h-3.5" />
             </button>
+          </div>
+        )}
+
+        {/* Calendar API Enablement Alert */}
+        {apiDisabledInfo && (
+          <div className="bg-sky-50 border-b border-sky-300 p-4 px-6 space-y-3 shrink-0">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2 text-sky-950 font-black text-xs">
+                <Sparkles className="w-4 h-4 text-sky-600 shrink-0" />
+                <span>تفعيل خدمة Google Calendar API مطلوب لمشروع Google Cloud ({apiDisabledInfo.projectId})</span>
+              </div>
+              <button
+                onClick={() => setApiDisabledInfo(null)}
+                className="text-stone-400 hover:text-stone-600 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-xs text-sky-900 leading-relaxed font-medium">
+              لمزامنة المواعيد مع تقويم Google، يرجى تفعيل الخدمة لمرة واحدة بالضغط على الزر أدناه:
+            </p>
+            <div>
+              <a
+                href={apiDisabledInfo.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>فتح صفحة تفعيل Google Calendar API في Google Cloud Console ↗</span>
+              </a>
+            </div>
           </div>
         )}
 

@@ -90,6 +90,7 @@ export interface Candidate {
   city?: string;
   job: string;
   country: string;
+  idCardNumber?: string;
   passportNumber?: string;
   passportIssueDate?: string;
   passportExpiryDate?: string;
