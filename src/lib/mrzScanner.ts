@@ -732,6 +732,22 @@ export function analyzeAndCrossCheckPassport(
  */
 export const SAMPLE_PASSPORTS = [
   {
+    title: "جواز سفر إثيوبي - عاملة منزلية (سليم ومطابق 100%)",
+    country: "إثيوبيا",
+    line1: "P<ETHALEMU<<ABEBECH<MESERET<<<<<<<<<<<<<<<<<<",
+    line2: "EP83920148ETH9603150F3108206<<<<<<<<<<<<<<00",
+    visual: {
+      fullName: "Abebech Meseret Alemu",
+      fullNameArabic: "أبيبيتش ميسيريت أليمو",
+      passportNumber: "EP8392014",
+      birthDate: "1996-03-15",
+      expiryDate: "2031-08-20",
+      gender: "female" as const,
+      nationality: "إثيوبيا",
+      jobTitle: "عاملة منزلية"
+    }
+  },
+  {
     title: "جواز سفر مصري (سليم ومطابق 100%)",
     country: "جمهورية مصر العربية",
     line1: "P<EGYAHMED<<MOHAMED<IBRAHIM<<<<<<<<<<<<<<<<<",

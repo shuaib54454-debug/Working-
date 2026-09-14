@@ -71,7 +71,7 @@ export const CandidateIdCardModal: React.FC<CandidateIdCardModalProps> = ({
   const [showDates, setShowDates] = useState<boolean>(true);
   const [showQrCode, setShowQrCode] = useState<boolean>(true);
   const [cardSide, setCardSide] = useState<"both" | "front" | "back">("both");
-  const [zoomLevel, setZoomLevel] = useState<number>(1.25); // visual preview scaling
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0); // visual preview scaling (optimal on mobile & desktop)
 
   // Status and export
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
@@ -98,7 +98,7 @@ export const CandidateIdCardModal: React.FC<CandidateIdCardModalProps> = ({
 
   // Re-render card whenever data or toggles change
   useEffect(() => {
-    if (!isOpen || !cardContainerRef.current) return;
+    if (!isOpen) return;
 
     const options: IdCardRenderOptions = {
       maskSensitiveData,
@@ -109,7 +109,20 @@ export const CandidateIdCardModal: React.FC<CandidateIdCardModalProps> = ({
       side: cardSide
     };
 
-    renderIdCard(cardContainerRef.current, cardData, options);
+    const doRender = () => {
+      if (cardContainerRef.current) {
+        renderIdCard(cardContainerRef.current, cardData, options);
+      }
+    };
+
+    doRender();
+    const rafId = requestAnimationFrame(doRender);
+    const timerId = setTimeout(doRender, 60);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(timerId);
+    };
   }, [
     isOpen,
     cardData.fullName,
@@ -207,7 +220,7 @@ export const CandidateIdCardModal: React.FC<CandidateIdCardModalProps> = ({
         {/* Modal Body: Split into Controls & Live Preview */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 bg-stone-50">
           {/* Controls Panel (Left in RTL, Right in LTR) */}
-          <div className="lg:col-span-4 space-y-4">
+          <div className="lg:col-span-4 space-y-4 order-2 lg:order-1">
             {/* Card View & Zoom Controls */}
             <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-xs space-y-3">
               <h3 className="text-xs font-black text-[#172a46] uppercase tracking-wider flex items-center gap-1.5">
@@ -439,9 +452,9 @@ export const CandidateIdCardModal: React.FC<CandidateIdCardModalProps> = ({
           </div>
 
           {/* Live Preview Area (Center & Right in RTL) */}
-          <div className="lg:col-span-8 flex flex-col items-center justify-start space-y-4">
+          <div className="lg:col-span-8 flex flex-col items-center justify-start space-y-4 order-1 lg:order-2">
             {/* Visual Canvas Container */}
-            <div className="w-full bg-stone-200/70 border-2 border-dashed border-stone-300 rounded-3xl p-6 sm:p-10 flex flex-col items-center justify-center min-h-[380px] overflow-hidden relative">
+            <div className="w-full bg-stone-200/70 border-2 border-dashed border-stone-300 rounded-3xl p-4 sm:p-8 flex flex-col items-center justify-center min-h-[340px] sm:min-h-[380px] overflow-x-auto relative">
               <div
                 className="transition-transform duration-200 origin-center"
                 style={{ transform: `scale(${zoomLevel})` }}

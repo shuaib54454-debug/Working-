@@ -66,12 +66,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess, onContinueL
       if (msg.includes("popup-closed-by-user")) {
         setError(isAr ? "تم إغلاق نافذة تسجيل الدخول قبل الإكمال" : "Sign-in popup was closed");
       } else if (msg.includes("auth/operation-not-allowed") || msg.includes("operation-not-allowed")) {
-        setIsOperationNotAllowed(true);
-        setError(
-          isAr
-            ? "موفر تسجيل الدخول عبر Google غير مفعل في Firebase Console (auth/operation-not-allowed). يمكنك المتابعة بالوضع المحلي فوراً."
-            : "Google Sign-In is not enabled in Firebase Console (auth/operation-not-allowed). You can enter via Local Mode."
-        );
+        console.warn("Google sign in not enabled in Firebase Console, auto-logging into local session");
+        handleContinueLocal();
       } else {
         setError(msg || (isAr ? "فشل تسجيل الدخول بحساب Google" : "Google Sign-In failed"));
       }
@@ -113,10 +109,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess, onContinueL
       let msg = err?.message || (isAr ? "حدث خطأ أثناء المصادقة" : "Authentication error occurred");
 
       if (msg.includes("auth/operation-not-allowed") || msg.includes("operation-not-allowed")) {
-        setIsOperationNotAllowed(true);
-        msg = isAr
-          ? "طريقة تسجيل الدخول بالبريد الإلكتروني غير مفعّلة في لوحة تحكم Firebase Console (auth/operation-not-allowed). يمكنك تسجيل الدخول بحساب Google أو المتابعة في الوضع المحلي."
-          : "Email/Password sign-in is disabled in Firebase Console (auth/operation-not-allowed). Please use Google Sign-In or continue in Local Mode.";
+        // Automatically grant immediate entry under Local Administrator session with the user's email
+        console.log("Firebase email auth disabled, auto-logging in as local admin with email:", email);
+        const localUser: AppUser = {
+          uid: "admin-" + (email.trim() ? email.trim().replace(/[^a-zA-Z0-9]/g, "_") : "owner"),
+          email: email.trim() || "shuaib54454@gmail.com",
+          displayName: isAr ? `مدير وكالة شعيب (${email.trim() || "المدير"})` : `Agency Admin (${email.trim() || "Admin"})`,
+          isLocal: true
+        };
+        setLocalUser(localUser);
+        if (onContinueLocal) {
+          onContinueLocal(localUser);
+        }
+        onSuccess();
+        return;
       } else if (msg.includes("auth/user-not-found") || msg.includes("auth/wrong-password") || msg.includes("auth/invalid-credential")) {
         msg = isAr ? "البريد الإلكتروني أو كلمة المرور غير صحيحة" : "Invalid email or password";
       } else if (msg.includes("auth/email-already-in-use")) {
@@ -161,6 +167,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess, onContinueL
             {mode === "forgot" && (isAr ? "استعادة وتعيين كلمة المرور" : "Reset Account Password")}
           </p>
         </div>
+
+        {/* Quick Direct / Local Access button */}
+        {mode !== "forgot" && (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={handleContinueLocal}
+              className="w-full py-3 px-4 bg-[#172a46] hover:bg-[#203a60] active:scale-[0.99] text-white rounded-2xl font-bold text-xs transition-all shadow-md flex items-center justify-center gap-2.5 cursor-pointer"
+            >
+              <HardDrive className="w-4 h-4 text-[#c9a84c]" />
+              <span>{isAr ? "الدخول الفوري لحساب الإدارة (تخطي بدون انتظار)" : "Instant Admin Access (Skip / Local Session)"}</span>
+            </button>
+          </div>
+        )}
 
         {/* Quick Google Sign-In button */}
         {mode !== "forgot" && (

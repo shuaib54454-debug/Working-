@@ -41,8 +41,17 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
-  // For API calls, go directly to network
-  if (event.request.url.includes('/api/')) {
+  // For API calls, dev modules, and vite assets, go directly to network
+  const url = event.request.url;
+  if (
+    url.includes('/api/') ||
+    url.includes('/@vite') ||
+    url.includes('/@') ||
+    url.includes('/src/') ||
+    url.includes('/node_modules/') ||
+    url.includes('?v=') ||
+    url.includes('hot-update')
+  ) {
     return;
   }
 

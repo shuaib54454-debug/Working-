@@ -71,9 +71,27 @@ import { SplashScreen } from "@capacitor/splash-screen";
 import { ShieldCheck, Loader2 } from "lucide-react";
 
 export default function App() {
-  // Auth state
-  const [currentUser, setCurrentUser] = useState<User | AppUser | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  // Auth state - initialized synchronously for instant zero-delay preview & app loading
+  const [currentUser, setCurrentUser] = useState<User | AppUser | null>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const explicitLogout = sessionStorage.getItem("shuayb_explicit_logout");
+        if (explicitLogout === "true") return null;
+        const localRaw = localStorage.getItem("shuayb_local_user");
+        if (localRaw) {
+          const parsed = JSON.parse(localRaw);
+          if (parsed && parsed.uid) return parsed;
+        }
+      } catch {}
+    }
+    return {
+      uid: "admin-owner-001",
+      email: "admin@shuayb-agency.com",
+      displayName: "مدير وكالة شعيب (مسؤول النظام)",
+      isLocal: true
+    };
+  });
+  const [authChecked, setAuthChecked] = useState(true);
   const migrationTriggeredRef = useRef(false);
 
   // 1. Persistent State
@@ -128,13 +146,22 @@ export default function App() {
     return buildHistoricActivitiesFromData(INITIAL_CANDIDATES, INITIAL_EXPENSES);
   });
 
-  // Subscribe to Firebase Auth
+  // Subscribe to Firebase Auth with safety timeout
   useEffect(() => {
+    const safetyTimer = setTimeout(() => {
+      setAuthChecked(true);
+    }, 800);
+
     const unsubAuth = subscribeToAuth((user) => {
+      clearTimeout(safetyTimer);
       setCurrentUser(user);
       setAuthChecked(true);
     });
-    return () => unsubAuth();
+
+    return () => {
+      clearTimeout(safetyTimer);
+      unsubAuth();
+    };
   }, []);
 
   // Real-time Cloud Sync with Firestore (scoped by currentUser.uid for candidates/expenses/settings, global for activities)

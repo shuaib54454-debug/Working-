@@ -20,13 +20,29 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
     <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(reg => console.log('PWA ServiceWorker registered:', reg.scope))
-            .catch(err => console.warn('PWA ServiceWorker registration failed:', err));
-        });
-      }
+      try {
+        if ('serviceWorker' in navigator) {
+          var isEmbedded = false;
+          try {
+            isEmbedded = window.self !== window.top;
+          } catch (frameErr) {
+            isEmbedded = true;
+          }
+          if (isEmbedded) {
+            if (navigator.serviceWorker.getRegistrations) {
+              navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                for (var i = 0; i < registrations.length; i++) {
+                  registrations[i].unregister();
+                }
+              }).catch(function() {});
+            }
+          } else {
+            window.addEventListener('load', function() {
+              navigator.serviceWorker.register('/sw.js').catch(function() {});
+            });
+          }
+        }
+      } catch (e) {}
     </script>
   </head>
   <body class="bg-[#fdfcfb] text-[#1a1c1e] antialiased selection:bg-[#c9a84c]/20 selection:text-[#172a46]">

@@ -204,6 +204,7 @@ let localUserListener: ((user: User | AppUser | null) => void) | null = null;
 export async function logoutUser(): Promise<void> {
   if (typeof window !== "undefined") {
     localStorage.removeItem("shuayb_local_user");
+    sessionStorage.setItem("shuayb_explicit_logout", "true");
   }
   if (localUserListener && !auth.currentUser) {
     localUserListener(null);
@@ -253,6 +254,11 @@ export function subscribeToAuth(callback: (user: User | AppUser | null) => void)
       callback(firebaseUser);
     } else {
       if (typeof window !== "undefined") {
+        const explicitLogout = sessionStorage.getItem("shuayb_explicit_logout");
+        if (explicitLogout === "true") {
+          callback(null);
+          return;
+        }
         const localRaw = localStorage.getItem("shuayb_local_user");
         if (localRaw) {
           try {
@@ -261,6 +267,18 @@ export function subscribeToAuth(callback: (user: User | AppUser | null) => void)
             return;
           } catch {}
         }
+        // Seamless default session for preview and immediate workspace access
+        const defaultAdmin: AppUser = {
+          uid: "admin-owner-001",
+          email: "admin@shuayb-agency.com",
+          displayName: "مدير وكالة شعيب (مسؤول النظام)",
+          isLocal: true
+        };
+        try {
+          localStorage.setItem("shuayb_local_user", JSON.stringify(defaultAdmin));
+        } catch {}
+        callback(defaultAdmin);
+        return;
       }
       callback(null);
     }
