@@ -1,14 +1,13 @@
 name: Passport Approval Hardening
 
 on:
-  pull_request:
+  workflow_dispatch:
+  push:
     branches:
       - main
-    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   harden:
@@ -100,8 +99,8 @@ jobs:
           git add src/components/PassportScannerModal.tsx src/lib/passportApprovalGuard.ts
           if ! git diff --cached --quiet; then
             git commit -m 'security: require real verified passport MRZ data'
-            git push origin HEAD:${{ github.head_ref }}
+            git push origin HEAD:main
           fi
           git rm -f .github/workflows/passport-fix.yml
           git commit -m 'chore: remove one-time passport hardening workflow'
-          git push origin HEAD:${{ github.head_ref }}
+          git push origin HEAD:main
