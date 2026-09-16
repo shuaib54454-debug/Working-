@@ -22,36 +22,20 @@ jobs:
           path = Path("src/components/PassportScannerModal.tsx")
           text = path.read_text(encoding="utf-8")
 
-          text = text.replace(
-              '  generateTD3MRZFromVisual,\n',
-              ''
-          )
+          text = text.replace('  generateTD3MRZFromVisual,\n', '')
 
-          # Never synthesize MRZ data from manually entered/visual fields during analysis.
           text = re.sub(
               r'\n    // If MRZ lines are missing but visual fields exist, auto-synthesize valid MRZ\n    if \(!parsedMRZ && \(candidateFirstName \|\| visualPassportNo\)\) \{.*?\n    \}\n\n    // Auto-fill candidate fields',
-              '\n    // Auto-fill candidate fields',
-              text,
-              flags=re.S,
-          )
+              '\n    // Auto-fill candidate fields', text, flags=re.S)
 
-          # Never synthesize MRZ data after an AI response with incomplete MRZ lines.
           text = re.sub(
               r'\n          // If MRZ lines are missing or partial, auto-synthesize from visual fields\n          if \(!line1 \|\| !line2 \|\| line1\.length < 40 \|\| line2\.length < 40\) \{.*?\n          \}\n\n          setMrzLine1\(line1\);',
-              '\n          setMrzLine1(line1);',
-              text,
-              flags=re.S,
-          )
+              '\n          setMrzLine1(line1);', text, flags=re.S)
 
-          # Remove the UI helper that generated a synthetic MRZ from manual data.
           text = re.sub(
               r'\n  // Auto-generate standard ICAO Doc 9303 MRZ lines from visual fields\n  const handleAutoGenerateMRZ = \(\) => \{.*?\n  \};\n',
-              '\n',
-              text,
-              flags=re.S,
-          )
+              '\n', text, flags=re.S)
 
-          # Replace handleApply with a strict approval gate backed by the parsed MRZ.
           start = text.find('  // Apply parsed and verified data to Candidate Form\n  const handleApply = () => {')
           end = text.find('\n  // Copy structured audit report', start)
           if start == -1 or end == -1:
@@ -113,16 +97,17 @@ jobs:
 
           guard = Path("src/lib/passportApprovalGuard.ts")
           guard_text = guard.read_text(encoding="utf-8")
-          guard_text = guard_text.replace(
-              '  if (isExpired && !input.allowExpired) {',
-              '  if (isExpired) {'
-          )
+          guard_text = guard_text.replace('  if (isExpired && !input.allowExpired) {', '  if (isExpired) {')
           guard.write_text(guard_text, encoding="utf-8")
           PY
 
-          # These patterns must never exist in production passport code.
-          if grep -RniE 'Math\.random\(\).*passport|P0000000|"مرشحة جديدة"|"EP" \+ Math\.floor|allowExpired: true|generateTD3MRZFromVisual' src/components src/lib --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
-            echo "❌ Unsafe synthetic passport fallback remains in production code."
+          if grep -RniE 'Math\.random\(\).*passport|P0000000|"مرشحة جديدة"|"EP" \+ Math\.floor|allowExpired: true|generateTD3MRZFromVisual' src/components --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
+            echo "❌ Unsafe synthetic passport fallback remains in production components."
+            exit 1
+          fi
+
+          if grep -RniE 'if \(isExpired && !input\.allowExpired\)|allowExpired: true' src/lib src/components --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
+            echo "❌ Expired passport approval override remains in production code."
             exit 1
           fi
 
