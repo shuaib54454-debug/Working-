@@ -1,6 +1,6 @@
 import express from "express";
 import { GoogleGenAI } from "@google/genai";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { getAuth } from "firebase-admin/auth";
@@ -14,9 +14,17 @@ const OWNER_EMAIL = String(process.env.OWNER_EMAIL || "shuaib54454@gmail.com").t
 
 const configPath = path.join(__dirname, "firebase-applet-config.json");
 let firebaseConfig: any = {};
-try { firebaseConfig = JSON.parse(readFileSync(configPath, "utf-8")); } catch (error) { console.error("Failed to load Firebase config"); }
+try {
+  firebaseConfig = JSON.parse(readFileSync(configPath, "utf-8"));
+} catch {
+  console.error("Failed to load Firebase config");
+}
 const PRIMARY_PROJECT_ID = String(firebaseConfig?.projectId || "");
-const ALLOWED_PROJECT_IDS = new Set<string>([PRIMARY_PROJECT_ID, ...(Array.isArray(firebaseConfig?.allowedProjectIds) ? firebaseConfig.allowedProjectIds : [])].filter(Boolean).map(String));
+const ALLOWED_PROJECT_IDS = new Set<string>(
+  [PRIMARY_PROJECT_ID, ...(Array.isArray(firebaseConfig?.allowedProjectIds) ? firebaseConfig.allowedProjectIds : [])]
+    .filter(Boolean)
+    .map(String)
+);
 const firebaseApps = new Map<string, FirebaseAdminApp>();
 
 function getFirebaseAuthForProject(projectId: string) {
@@ -47,7 +55,9 @@ async function verifyPassportScanAuth(req: express.Request, res: express.Respons
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ success: false, error: "Authentication required" });
   const idToken = authHeader.slice(7).trim();
-  if (!idToken || idToken === "guest" || idToken === "applet-agency-session" || idToken.startsWith("local-mode-user:")) return res.status(401).json({ success: false, error: "A verified Firebase ID token is required" });
+  if (!idToken || idToken === "guest" || idToken === "applet-agency-session" || idToken.startsWith("local-mode-user:")) {
+    return res.status(401).json({ success: false, error: "A verified Firebase ID token is required" });
+  }
   try {
     const projectId = getTokenProjectId(idToken);
     const decoded = await getFirebaseAuthForProject(projectId).verifyIdToken(idToken, true);
@@ -64,32 +74,81 @@ async function verifyPassportScanAuth(req: express.Request, res: express.Respons
 const geminiKey = process.env.GEMINI_API_KEY;
 const ai = geminiKey ? new GoogleGenAI({ apiKey: geminiKey }) : null;
 
+// CORS is allowlisted. Never reflect an arbitrary Origin while credentials are enabled.
+const configuredOrigins = String(process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set<string>([
+  ...configuredOrigins,
+  "capacitor://localhost",
+  "http://localhost",
+  "https://localhost",
+  "http://localhost:3000",
+  "https://localhost:3000"
+]);
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
-  res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
-  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma, X-Client-Version, X-Platform");
-  if (req.method === "OPTIONS") return res.sendStatus(204);
+  if (origin && allowedOrigins.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, Cache-Control, Pragma, X-Client-Version, X-Platform");
+  if (req.method === "OPTIONS") {
+    if (origin && !allowedOrigins.has(origin)) return res.sendStatus(403);
+    return res.sendStatus(204);
+  }
   return next();
 });
-app.use(express.json({ limit: "25mb" }));
-app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
-app.get("/api/health", (_req, res) => res.json({ status: "ok", timestamp: new Date().toISOString(), service: "shuayb-recruitment-api", hasGeminiKey: !!geminiKey, projectId: PRIMARY_PROJECT_ID, allowedProjects: [...ALLOWED_PROJECT_IDS] }));
+app.use(express.json({ limit: "12mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
+// Health is intentionally non-diagnostic: do not expose project IDs, key presence,
+// or deployment details to unauthenticated callers.
+app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 
 app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
   try {
     const { imageBase64, mimeType = "image/jpeg" } = req.body || {};
-    if (typeof imageBase64 !== "string" || imageBase64.length < 100) return res.status(400).json({ success: false, error: "Valid passport image is required" });
+    const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+    if (typeof imageBase64 !== "string" || imageBase64.length < 100) {
+      return res.status(400).json({ success: false, error: "Valid passport image is required" });
+    }
+    if (!allowedMimeTypes.has(mimeType)) {
+      return res.status(400).json({ success: false, error: "Unsupported image type" });
+    }
+    const rawBase64 = imageBase64.replace(/^data:[^;]+;base64,/, "").replace(/\s/g, "");
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(rawBase64) || rawBase64.length % 4 !== 0) {
+      return res.status(400).json({ success: false, error: "Invalid image encoding" });
+    }
+    // Limit decoded image payload to approximately 8 MiB.
+    const estimatedBytes = Math.floor((rawBase64.length * 3) / 4);
+    if (estimatedBytes > 8 * 1024 * 1024) {
+      return res.status(413).json({ success: false, error: "Passport image is too large" });
+    }
     if (!ai) return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
+
     const prompt = `Analyze this passport image for OCR and MRZ data. Never invent, repair, synthesize, reconstruct, or guess any MRZ characters or passport fields. Return JSON only. Set overallStatus to VERIFIED only when a complete visible MRZ is present and all check digits/checksums validate. If the MRZ is missing, incomplete, unreadable, or invalid, return overallStatus as NEEDS_REVIEW and preserve uncertainty rather than fabricating values. Extract visible fields only: passportNumber, surname, givenNames, nationality, dateOfBirth, sex, dateOfExpiry, issuingCountry, mrz, and confidence.`;
     const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
     let lastError: unknown = null;
+
     for (const model of models) {
       try {
-        const result = await ai.models.generateContent({ model, contents: [{ role: "user", parts: [{ inlineData: { mimeType, data: imageBase64.replace(/^data:[^;]+;base64,/, "") } }, { text: prompt }] }], config: { responseMimeType: "application/json" } });
+        const result = await ai.models.generateContent({
+          model,
+          contents: [{
+            role: "user",
+            parts: [
+              { inlineData: { mimeType, data: rawBase64 } },
+              { text: prompt }
+            ]
+          }],
+          config: { responseMimeType: "application/json" }
+        });
         const text = result.text?.trim();
         if (!text) throw new Error("Empty Gemini response");
         const parsed = JSON.parse(text);
@@ -99,6 +158,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
         console.warn(`Gemini passport scan failed for ${model}:`, error instanceof Error ? error.message : "unknown error");
       }
     }
+
     console.error("All Gemini passport scan models failed:", lastError instanceof Error ? lastError.message : "unknown error");
     return res.status(502).json({ success: false, error: "Passport scanning service failed" });
   } catch (error) {
@@ -107,25 +167,9 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
   }
 });
 
-app.get("/api/download-apk", (_req, res) => {
-  const apkPath = path.join(__dirname, "public", "app-debug.apk");
-  if (!existsSync(apkPath)) return res.status(404).send("APK not found");
-  return res.download(apkPath, "shuayb-recruitment-debug.apk");
-});
-app.get("/download/app-debug.apk", (_req, res) => {
-  const apkPath = path.join(__dirname, "public", "app-debug.apk");
-  if (!existsSync(apkPath)) return res.status(404).send("APK not found");
-  return res.download(apkPath, "shuayb-recruitment-debug.apk");
-});
-app.get("/app-debug.apk", (_req, res) => {
-  const apkPath = path.join(__dirname, "public", "app-debug.apk");
-  if (!existsSync(apkPath)) return res.status(404).send("APK not found");
-  return res.download(apkPath, "shuayb-recruitment-debug.apk");
-});
-
 app.get("/manifest.webmanifest", (_req, res) => res.sendFile(path.join(__dirname, "public", "manifest.webmanifest")));
 app.get("/sw.js", (_req, res) => res.sendFile(path.join(__dirname, "public", "sw.js")));
 app.use(express.static(path.join(__dirname, "dist")));
 app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "dist", "index.html")));
 
-app.listen(PORT, "0.0.0.0", () => console.log(`Server running on http://0.0.0.0:${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
