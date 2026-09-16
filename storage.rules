@@ -6,17 +6,12 @@ service firebase.storage {
       allow read, write: if false;
     }
 
-    function isSignedIn() {
-      return request.auth != null && request.auth.uid != null;
-    }
-
-    // Keep Storage admin access independent of the named Firestore database.
-    // Additional admin users should receive the `admin` custom claim.
-    function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.admin == true ||
-        request.auth.token.email == "shuaib54454@gmail.com"
-      );
+    // Current product phase: one owner account only.
+    // Employee accounts can be introduced later with a separate role model.
+    function isOwner() {
+      return request.auth != null &&
+        request.auth.uid != null &&
+        request.auth.token.email == "shuaib54454@gmail.com";
     }
 
     function isAllowedDocumentType() {
@@ -24,25 +19,18 @@ service firebase.storage {
              request.resource.contentType.matches('application/pdf');
     }
 
-    // Worker documents are isolated using the ownerUid custom metadata written by
-    // uploadWorkerDocument(). Existing ownership is also checked on overwrite so a
-    // user cannot replace another user's file while changing the metadata to their UID.
+    // Worker documents are available only to the single owner. Existing ownership
+    // is also checked on overwrite so metadata cannot be changed to bypass isolation.
     match /workers/{candidateId}/{folder}/{fileName} {
-      allow read: if isAdmin() || (
-        isSignedIn() && resource != null && resource.metadata.ownerUid == request.auth.uid
-      );
+      allow read: if isOwner() && resource != null && resource.metadata.ownerUid == request.auth.uid;
 
-      allow write: if isAdmin() || (
-        isSignedIn() &&
+      allow write: if isOwner() &&
         request.resource.size < 15 * 1024 * 1024 &&
         isAllowedDocumentType() &&
         request.resource.metadata.ownerUid == request.auth.uid &&
-        (resource == null || resource.metadata.ownerUid == request.auth.uid)
-      );
+        (resource == null || resource.metadata.ownerUid == request.auth.uid);
 
-      allow delete: if isAdmin() || (
-        isSignedIn() && resource != null && resource.metadata.ownerUid == request.auth.uid
-      );
+      allow delete: if isOwner() && resource != null && resource.metadata.ownerUid == request.auth.uid;
     }
   }
 }
