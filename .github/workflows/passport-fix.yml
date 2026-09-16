@@ -10,17 +10,126 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Remove production passport placeholders
+
+      - name: Enforce real passport data before approval
         shell: bash
         run: |
           set -euo pipefail
-          sed -i 's/givenNames || "المرشح"/givenNames || ""/' src/components/PassportScannerModal.tsx
-          sed -i 's/ || "المرشح" ?/ || "" ?/' src/components/PassportScannerModal.tsx || true
-          ! grep -RniE 'P0000000|Math\.random\(\).*passport|givenNames \|\| "المرشح"|setCandidateFirstName\("المرشح"\)' src/components src/lib --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("src/components/PassportScannerModal.tsx")
+          text = path.read_text(encoding="utf-8")
+
+          text = text.replace(
+              '  generateTD3MRZFromVisual,\n',
+              ''
+          )
+
+          # Never synthesize MRZ data from manually entered/visual fields during analysis.
+          text = re.sub(
+              r'\n    // If MRZ lines are missing but visual fields exist, auto-synthesize valid MRZ\n    if \(!parsedMRZ && \(candidateFirstName \|\| visualPassportNo\)\) \{.*?\n    \}\n\n    // Auto-fill candidate fields',
+              '\n    // Auto-fill candidate fields',
+              text,
+              flags=re.S,
+          )
+
+          # Never synthesize MRZ data after an AI response with incomplete MRZ lines.
+          text = re.sub(
+              r'\n          // If MRZ lines are missing or partial, auto-synthesize from visual fields\n          if \(!line1 \|\| !line2 \|\| line1\.length < 40 \|\| line2\.length < 40\) \{.*?\n          \}\n\n          setMrzLine1\(line1\);',
+              '\n          setMrzLine1(line1);',
+              text,
+              flags=re.S,
+          )
+
+          # Remove the UI helper that generated a synthetic MRZ from manual data.
+          text = re.sub(
+              r'\n  // Auto-generate standard ICAO Doc 9303 MRZ lines from visual fields\n  const handleAutoGenerateMRZ = \(\) => \{.*?\n  \};\n',
+              '\n',
+              text,
+              flags=re.S,
+          )
+
+          # Replace handleApply with a strict approval gate backed by the parsed MRZ.
+          start = text.find('  // Apply parsed and verified data to Candidate Form\n  const handleApply = () => {')
+          end = text.find('\n  // Copy structured audit report', start)
+          if start == -1 or end == -1:
+              raise SystemExit('handleApply anchors not found')
+
+          replacement = '''  // Apply only real, verified passport data to the candidate form.
+  const handleApply = () => {
+    const mrz = analysis?.mrz;
+    const isVerified = Boolean(
+      mrz &&
+      mrz.checksums.allValid &&
+      analysis?.overallStatus === "VERIFIED" &&
+      !analysis.validityAnalysis.isExpired
+    );
+
+    if (!isVerified) {
+      setErrorMessage("لا يمكن اعتماد بيانات الجواز قبل استخراج MRZ حقيقي والتحقق من جميع أرقام التحقق والمطابقة.");
+      return;
+    }
+
+    const fName = (mrz?.givenNames || candidateFirstName).trim();
+    const lName = (mrz?.surname || candidateLastName || fName).trim();
+    const passNo = cleanPassportNumber(mrz?.passportNumber || visualPassportNo);
+    const passExp = normalizeDateToISO(mrz?.expiryDateFormatted || visualExpiryDate);
+    const bDate = normalizeDateToISO(mrz?.birthDateFormatted || visualBirthDate);
+    const gndr = mrz?.gender === "female" ? "female" : "male";
+    const cntry = mrz?.nationalityName || mrz?.issuingCountryName || visualNationality;
+
+    const approval = canApprovePassportData({
+      hasVerifiedMrz: true,
+      passportNumber: passNo,
+      firstName: fName,
+      lastName: lName,
+      birthDate: bDate,
+      expiryDate: passExp
+    });
+
+    if (!approval.allowed || !approval.normalizedData) {
+      setErrorMessage(approval.reason || "لا يمكن اعتماد بيانات الجواز قبل اكتمال التحقق.");
+      return;
+    }
+
+    onApplyData({
+      firstName: approval.normalizedData.firstName,
+      lastName: approval.normalizedData.lastName,
+      passportNumber: approval.normalizedData.passportNumber,
+      passportExpiryDate: approval.normalizedData.expiryDate,
+      dateOfBirth: approval.normalizedData.birthDate,
+      gender: gndr,
+      country: cntry,
+      job: visualJob || "عاملة منزلية"
+    });
+
+    onClose();
+  };
+'''
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding="utf-8")
+
+          guard = Path("src/lib/passportApprovalGuard.ts")
+          guard_text = guard.read_text(encoding="utf-8")
+          guard_text = guard_text.replace(
+              '  if (isExpired && !input.allowExpired) {',
+              '  if (isExpired) {'
+          )
+          guard.write_text(guard_text, encoding="utf-8")
+          PY
+
+          # These patterns must never exist in production passport code.
+          if grep -RniE 'Math\.random\(\).*passport|P0000000|"مرشحة جديدة"|"EP" \+ Math\.floor|allowExpired: true|generateTD3MRZFromVisual' src/components src/lib --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
+            echo "❌ Unsafe synthetic passport fallback remains in production code."
+            exit 1
+          fi
+
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/components/PassportScannerModal.tsx
+          git add src/components/PassportScannerModal.tsx src/lib/passportApprovalGuard.ts
           if ! git diff --cached --quiet; then
-            git commit -m 'fix: remove final passport placeholder'
+            git commit -m 'security: require real verified passport MRZ data'
             git push origin HEAD:main
           fi
