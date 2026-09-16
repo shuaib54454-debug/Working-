@@ -25,6 +25,17 @@ describe("canApprovePassportData", () => {
     }).allowed, false);
   });
 
+  it("rejects approval when the passport number is missing", () => {
+    assert.equal(canApprovePassportData({
+      hasVerifiedMrz: true,
+      passportNumber: "",
+      firstName: "JOHN",
+      lastName: "DOE",
+      birthDate: "1990-01-01",
+      expiryDate: "2030-01-01"
+    }).allowed, false);
+  });
+
   it("allows complete data backed by verified MRZ", () => {
     assert.equal(canApprovePassportData({
       hasVerifiedMrz: true,
