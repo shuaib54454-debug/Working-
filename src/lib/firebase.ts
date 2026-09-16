@@ -38,6 +38,8 @@ import firebaseConfig from "../../firebase-applet-config.json";
 import { Candidate, GeneralExpense, AgencySettings, ActivityLogEntry } from "../types";
 import { compressImage } from "./imageUtils";
 
+export type WorkerStorageFolder = "passport" | "photo" | "contract" | "visa" | "medical" | "coc" | "documents";
+
 const OWNER_EMAIL = "shuaib54454@gmail.com";
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
@@ -86,7 +88,6 @@ export const db = firestoreInstance;
 export const storage = getStorage(app);
 
 export enum OperationType { CREATE = "create", UPDATE = "update", DELETE = "delete", LIST = "list", GET = "get", WRITE = "write" }
-
 export interface FirestoreErrorInfo { error: string; operationType: OperationType; path: string | null; }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
@@ -141,7 +142,6 @@ export async function changeCurrentUserPassword(newPassword: string): Promise<vo
 }
 
 export function setLocalUser(_user: AppUser | null): void {
-  // Local authentication is intentionally disabled. Kept only for API compatibility with older callers.
   if (localUserListener && !auth.currentUser) localUserListener(null);
 }
 
@@ -230,7 +230,18 @@ export function subscribeToActivities(onUpdate: (activities: ActivityLogEntry[])
 
 export async function syncActivityToCloud(activity: ActivityLogEntry): Promise<void> { const uid = auth.currentUser?.uid; if (!auth.currentUser || !uid) return; try { await withDbRetry(() => setDoc(doc(db, "activities", activity.id), { ...activity, ownerUid: uid }, { merge: true })); } catch (e) { handleFirestoreError(e, OperationType.WRITE, `activities/${activity.id}`); } }
 
-export async function uploadWorkerDocument(candidateId: string, folder: "passport" | "photo" | "contract" | "visa" | "medical" | "coc" | "documents", fileOrBlob: File | Blob, customFileName?: string): Promise<{ downloadUrl: string; storagePath: string; docId: string; fileName: string; sizeBytes: number; isPdf: boolean }> {
+function dataUrlToBlob(dataUrl: string): Blob {
+  const match = dataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/s);
+  if (!match) throw new Error("Invalid compressed image data");
+  const mimeType = match[1] || "image/jpeg";
+  const base64 = match[2];
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType });
+}
+
+export async function uploadWorkerDocument(candidateId: string, folder: WorkerStorageFolder, fileOrBlob: File | Blob, customFileName?: string): Promise<{ downloadUrl: string; storagePath: string; docId: string; fileName: string; sizeBytes: number; isPdf: boolean }> {
   const uid = auth.currentUser?.uid;
   if (!auth.currentUser || !uid) throw new Error("Authentication required");
   const cleanCandidateId = candidateId.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -240,8 +251,13 @@ export async function uploadWorkerDocument(candidateId: string, folder: "passpor
   const isPdf = (fileOrBlob.type || "").toLowerCase() === "application/pdf";
   if (isPdf && fileOrBlob.size > 3 * 1024 * 1024) throw new Error("PDF file is too large");
   if (!isPdf && !fileOrBlob.type.toLowerCase().startsWith("image/")) throw new Error("Only images and PDF files are allowed");
+
   let uploadBlob: Blob = fileOrBlob;
-  if (!isPdf) uploadBlob = await compressImage(fileOrBlob, 1400, 0.82);
+  if (!isPdf) {
+    const compressedDataUrl = await compressImage(fileOrBlob, { maxWidth: 1400, maxHeight: 1400, quality: 0.82, mimeType: "image/jpeg" });
+    uploadBlob = dataUrlToBlob(compressedDataUrl);
+  }
+
   const fileRef = storageRef(storage, path);
   try {
     const snapshot = await uploadBytes(fileRef, uploadBlob, { contentType: uploadBlob.type || (isPdf ? "application/pdf" : "image/jpeg"), customMetadata: { ownerUid: uid, candidateId: cleanCandidateId, docId, folder, uploadedAt: new Date().toISOString() } });
