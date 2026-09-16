@@ -38,55 +38,24 @@ import firebaseConfig from "../../firebase-applet-config.json";
 import { Candidate, GeneralExpense, AgencySettings, ActivityLogEntry } from "../types";
 import { compressImage } from "./imageUtils";
 
+const OWNER_EMAIL = "shuaib54454@gmail.com";
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-
 export const auth = getAuth(app);
 
-// Safe, resilient persistence initialization with fallbacks
 if (typeof window !== "undefined") {
   (async () => {
     try {
       await setPersistence(auth, browserLocalPersistence);
-    } catch (localErr) {
-      console.warn("browserLocalPersistence not available or closed, attempting session persistence:", localErr);
+    } catch {
       try {
         await setPersistence(auth, browserSessionPersistence);
-      } catch (sessionErr) {
-        console.warn("browserSessionPersistence failed, using in-memory persistence:", sessionErr);
+      } catch {
         await setPersistence(auth, inMemoryPersistence).catch(() => {});
       }
     }
   })();
-
-  // Catch and suppress benign background IndexedDB closure errors (e.g., when browser tabs hide or sleep)
-  window.addEventListener("unhandledrejection", (event) => {
-    const reason = event?.reason;
-    const msg = typeof reason === "string" ? reason : reason?.message || "";
-    if (
-      msg.includes("Database is closing") ||
-      msg.includes("Database is closing/hidden") ||
-      msg.includes("The database connection is closing") ||
-      reason?.name === "InvalidStateError"
-    ) {
-      console.warn("Safely handled transient background IndexedDB closure:", msg);
-      event.preventDefault();
-    }
-  });
-
-  window.addEventListener("error", (event) => {
-    const msg = event?.message || "";
-    if (
-      msg.includes("Database is closing") ||
-      msg.includes("Database is closing/hidden") ||
-      msg.includes("The database connection is closing")
-    ) {
-      console.warn("Safely suppressed window error regarding closing database:", msg);
-      event.preventDefault();
-    }
-  });
 }
 
-// Resilient helper to retry auth & DB operations if IndexedDB was momentarily closing/hidden
 async function withDbRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 350): Promise<T> {
   let attempt = 0;
   while (true) {
@@ -94,15 +63,10 @@ async function withDbRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 350):
       return await fn();
     } catch (err: any) {
       const msg = err?.message || String(err);
-      const isDbClosing =
-        msg.includes("Database is closing") ||
-        msg.includes("Database is closing/hidden") ||
-        msg.includes("The database connection is closing") ||
-        err?.name === "InvalidStateError";
+      const isDbClosing = msg.includes("Database is closing") || msg.includes("Database is closing/hidden") || msg.includes("The database connection is closing") || err?.name === "InvalidStateError";
       if (isDbClosing && attempt < retries) {
         attempt++;
-        console.warn(`Encountered closing database state (attempt ${attempt}/${retries}), retrying in ${delayMs}ms...`);
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await new Promise(resolve => setTimeout(resolve, delayMs));
         continue;
       }
       throw err;
@@ -112,685 +76,194 @@ async function withDbRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 350):
 
 const rawDbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
 const databaseId = rawDbId && rawDbId !== "(default)" ? rawDbId : undefined;
-
 let firestoreInstance;
 try {
-  firestoreInstance = initializeFirestore(
-    app,
-    {
-      experimentalForceLongPolling: true,
-      experimentalAutoDetectLongPolling: true
-    },
-    databaseId
-  );
+  firestoreInstance = initializeFirestore(app, { experimentalForceLongPolling: true, experimentalAutoDetectLongPolling: true }, databaseId);
 } catch {
   firestoreInstance = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 }
-
 export const db = firestoreInstance;
-
 export const storage = getStorage(app);
 
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
+export enum OperationType { CREATE = "create", UPDATE = "update", DELETE = "delete", LIST = "list", GET = "get", WRITE = "write" }
 
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  };
-}
+export interface FirestoreErrorInfo { error: string; operationType: OperationType; path: string | null; }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  const errInfo: FirestoreErrorInfo = { error: error instanceof Error ? error.message : String(error), operationType, path };
+  console.error("Firestore Error:", errInfo.error, operationType, path);
   return errInfo;
 }
 
+function assertOwnerEmail(email: string): void {
+  if (email.trim().toLowerCase() !== OWNER_EMAIL) throw new Error("This application is restricted to the owner account.");
+}
+
 export async function loginWithEmail(email: string, pass: string): Promise<User> {
+  assertOwnerEmail(email);
   return withDbRetry(async () => {
     const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
+    if ((cred.user.email || "").toLowerCase() !== OWNER_EMAIL) {
+      await firebaseSignOut(auth).catch(() => {});
+      throw new Error("This application is restricted to the owner account.");
+    }
     return cred.user;
   });
 }
 
 export async function registerOwnerAccount(email: string, pass: string): Promise<User> {
+  assertOwnerEmail(email);
   return withDbRetry(async () => {
     const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
     return cred.user;
   });
 }
 
-export interface AppUser {
-  uid: string;
-  email: string | null;
-  displayName?: string | null;
-  isLocal?: boolean;
-}
-
+export interface AppUser { uid: string; email: string | null; displayName?: string | null; isLocal?: boolean; }
 let localUserListener: ((user: User | AppUser | null) => void) | null = null;
 
 export async function logoutUser(): Promise<void> {
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("shuayb_local_user");
-    sessionStorage.setItem("shuayb_explicit_logout", "true");
-  }
-  if (localUserListener && !auth.currentUser) {
-    localUserListener(null);
-  }
-  return withDbRetry(async () => {
-    try {
-      await firebaseSignOut(auth);
-    } catch (e) {
-      console.warn("Sign out err:", e);
-    }
-  });
+  if (typeof window !== "undefined") sessionStorage.setItem("shuayb_explicit_logout", "true");
+  if (localUserListener && !auth.currentUser) localUserListener(null);
+  return withDbRetry(async () => { await firebaseSignOut(auth).catch(() => {}); });
 }
 
 export async function resetUserPassword(email: string): Promise<void> {
-  return withDbRetry(async () => {
-    await sendPasswordResetEmail(auth, email.trim());
-  });
+  assertOwnerEmail(email);
+  return withDbRetry(async () => { await sendPasswordResetEmail(auth, email.trim()); });
 }
 
 export async function changeCurrentUserPassword(newPassword: string): Promise<void> {
-  if (!auth.currentUser) throw new Error("No authenticated user");
-  return withDbRetry(async () => {
-    await firebaseUpdatePassword(auth.currentUser!, newPassword);
-  });
+  const user = auth.currentUser;
+  if (!user) throw new Error("No authenticated user");
+  assertOwnerEmail(user.email || "");
+  return withDbRetry(async () => { await firebaseUpdatePassword(user, newPassword); });
 }
 
-export function setLocalUser(user: AppUser | null) {
-  if (typeof window !== "undefined") {
-    if (user) {
-      localStorage.setItem("shuayb_local_user", JSON.stringify(user));
-    } else {
-      localStorage.removeItem("shuayb_local_user");
-    }
-  }
-  if (localUserListener && !auth.currentUser) {
-    localUserListener(user);
-  }
+export function setLocalUser(_user: AppUser | null): void {
+  // Local authentication is intentionally disabled. Kept only for API compatibility with older callers.
+  if (localUserListener && !auth.currentUser) localUserListener(null);
 }
 
 export function subscribeToAuth(callback: (user: User | AppUser | null) => void): Unsubscribe {
   localUserListener = callback;
-  const unsub = onAuthStateChanged(auth, (firebaseUser) => {
-    if (firebaseUser) {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("shuayb_local_user");
-      }
-      callback(firebaseUser);
-    } else {
-      if (typeof window !== "undefined") {
-        const explicitLogout = sessionStorage.getItem("shuayb_explicit_logout");
-        if (explicitLogout === "true") {
-          callback(null);
-          return;
-        }
-        const localRaw = localStorage.getItem("shuayb_local_user");
-        if (localRaw) {
-          try {
-            const parsed = JSON.parse(localRaw);
-            callback(parsed);
-            return;
-          } catch {}
-        }
-        // Seamless default session for preview and immediate workspace access
-        const defaultAdmin: AppUser = {
-          uid: "admin-owner-001",
-          email: "admin@shuayb-agency.com",
-          displayName: "مدير وكالة شعيب (مسؤول النظام)",
-          isLocal: true
-        };
-        try {
-          localStorage.setItem("shuayb_local_user", JSON.stringify(defaultAdmin));
-        } catch {}
-        callback(defaultAdmin);
-        return;
-      }
+  const unsub = onAuthStateChanged(auth, async firebaseUser => {
+    if (!firebaseUser) {
       callback(null);
+      return;
     }
+    if ((firebaseUser.email || "").toLowerCase() !== OWNER_EMAIL) {
+      await firebaseSignOut(auth).catch(() => {});
+      callback(null);
+      return;
+    }
+    callback(firebaseUser);
   });
-
-  return () => {
-    unsub();
-    localUserListener = null;
-  };
+  return () => { unsub(); localUserListener = null; };
 }
 
 export async function testFirebaseConnection(): Promise<boolean> {
   try {
-    if (!auth.currentUser) return true;
+    if (!auth.currentUser) return false;
     await getDocFromServer(doc(db, "_system", "connection_check"));
-    console.log("Firebase Firestore connected successfully");
     return true;
   } catch (error: any) {
     const errorMsg = error?.message || "";
-    if (
-      error instanceof Error &&
-      (errorMsg.includes("the client is offline") ||
-       errorMsg.includes("unavailable") ||
-       errorMsg.includes("offline") ||
-       errorMsg.includes("Database is closing"))
-    ) {
-      console.warn("Firebase client is currently in offline mode / reconnecting");
-    } else {
-      console.log("Firebase Firestore initialized:", errorMsg || "ready");
-    }
+    if (errorMsg.includes("offline") || errorMsg.includes("unavailable") || errorMsg.includes("Database is closing")) console.warn("Firebase is temporarily unavailable");
     return false;
   }
 }
 
-export function subscribeToCandidates(
-  ownerUid: string,
-  onUpdate: (candidates: Candidate[]) => void,
-  onError?: (err: Error) => void
-): Unsubscribe {
+export function subscribeToCandidates(ownerUid: string, onUpdate: (candidates: Candidate[]) => void, onError?: (err: Error) => void): Unsubscribe {
   const q = query(collection(db, "candidates"), where("ownerUid", "==", ownerUid));
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const list: Candidate[] = [];
-      snapshot.forEach((docSnap) => list.push(docSnap.data() as Candidate));
-      onUpdate(list);
-    },
-    (error) => {
-      const msg = error?.message || "";
-      if (msg.includes("Database is closing") || msg.includes("Database is closing/hidden")) {
-        console.warn("Candidates snapshot paused due to temporary database closing/hidden state");
-        return;
-      }
-      handleFirestoreError(error, OperationType.LIST, "candidates");
-      onError?.(error);
-    }
-  );
+  return onSnapshot(q, snapshot => { const list: Candidate[] = []; snapshot.forEach(d => list.push(d.data() as Candidate)); onUpdate(list); }, error => { handleFirestoreError(error, OperationType.LIST, "candidates"); onError?.(error); });
 }
 
 export async function syncCandidateToCloud(candidate: Candidate, ownerUid?: string): Promise<void> {
-  if (!auth.currentUser) return;
-  const uid = ownerUid || auth.currentUser.uid;
-  if (!uid) return;
-  const path = `candidates/${candidate.id}`;
-  try {
-    await withDbRetry(async () => {
-      await setDoc(doc(db, "candidates", candidate.id), { ...candidate, ownerUid: uid }, { merge: true });
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.WRITE, path);
-  }
+  const uid = ownerUid || auth.currentUser?.uid;
+  if (!auth.currentUser || !uid) return;
+  try { await withDbRetry(() => setDoc(doc(db, "candidates", candidate.id), { ...candidate, ownerUid: uid }, { merge: true })); } catch (e) { handleFirestoreError(e, OperationType.WRITE, `candidates/${candidate.id}`); }
 }
 
 export async function deleteCandidateFromCloud(candidateId: string): Promise<void> {
-  const path = `candidates/${candidateId}`;
-  try {
-    if (!auth.currentUser) return;
-    await withDbRetry(async () => {
-      await deleteDoc(doc(db, "candidates", candidateId));
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.DELETE, path);
-  }
+  if (!auth.currentUser) return;
+  try { await withDbRetry(() => deleteDoc(doc(db, "candidates", candidateId))); } catch (e) { handleFirestoreError(e, OperationType.DELETE, `candidates/${candidateId}`); }
 }
 
 export async function syncAllCandidatesBatch(candidates: Candidate[], ownerUid?: string): Promise<void> {
-  try {
-    if (!auth.currentUser) return;
-    const uid = ownerUid || auth.currentUser.uid;
-    if (!uid || candidates.length === 0) return;
-    await withDbRetry(async () => {
-      const batch = writeBatch(db);
-      candidates.forEach((cand) => {
-        batch.set(doc(db, "candidates", cand.id), { ...cand, ownerUid: uid }, { merge: true });
-      });
-      await batch.commit();
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.WRITE, "candidates/batch");
-  }
+  const uid = ownerUid || auth.currentUser?.uid;
+  if (!auth.currentUser || !uid || candidates.length === 0) return;
+  try { await withDbRetry(async () => { const batch = writeBatch(db); candidates.forEach(c => batch.set(doc(db, "candidates", c.id), { ...c, ownerUid: uid }, { merge: true })); await batch.commit(); }); } catch (e) { handleFirestoreError(e, OperationType.WRITE, "candidates/batch"); }
 }
 
-/**
- * Real-time bulk archive synchronization with Cloud Firestore.
- * Atomically updates multiple candidate documents to archived status using writeBatch.
- * Any listening devices will instantly receive the state update via onSnapshot.
- */
-export async function bulkArchiveCandidatesInCloud(
-  candidateIds: string[],
-  ownerUid?: string,
-  candidatesData?: Candidate[]
-): Promise<void> {
-  try {
-    if (!auth.currentUser) return;
-    const uid = ownerUid || auth.currentUser.uid;
-    if (!uid || candidateIds.length === 0) return;
-
-    await withDbRetry(async () => {
-      const batch = writeBatch(db);
-      const nowIso = new Date().toISOString();
-      const candMap = new Map<string, Candidate>();
-      if (candidatesData) {
-        candidatesData.forEach((c) => candMap.set(c.id, c));
-      }
-
-      candidateIds.forEach((id) => {
-        const existingCand = candMap.get(id);
-        const updatePayload: Record<string, unknown> = {
-          archived: true,
-          ownerUid: uid,
-          updatedAt: nowIso
-        };
-        if (existingCand) {
-          Object.assign(updatePayload, existingCand, {
-            archived: true,
-            ownerUid: uid,
-            updatedAt: nowIso
-          });
-        }
-        batch.set(doc(db, "candidates", id), updatePayload, { merge: true });
-      });
-
-      await batch.commit();
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.WRITE, "candidates/bulkArchive");
-    throw e;
-  }
+export async function bulkArchiveCandidatesInCloud(candidateIds: string[], ownerUid?: string, candidatesData?: Candidate[]): Promise<void> {
+  const uid = ownerUid || auth.currentUser?.uid;
+  if (!auth.currentUser || !uid || candidateIds.length === 0) return;
+  try { await withDbRetry(async () => { const batch = writeBatch(db); const nowIso = new Date().toISOString(); const map = new Map((candidatesData || []).map(c => [c.id, c])); candidateIds.forEach(id => batch.set(doc(db, "candidates", id), { ...(map.get(id) || {}), archived: true, ownerUid: uid, updatedAt: nowIso }, { merge: true })); await batch.commit(); }); } catch (e) { handleFirestoreError(e, OperationType.WRITE, "candidates/bulkArchive"); throw e; }
 }
 
-/**
- * Real-time bulk restore synchronization with Cloud Firestore.
- * Atomically restores multiple candidate documents from archive using writeBatch.
- */
-export async function bulkRestoreCandidatesInCloud(
-  candidateIds: string[],
-  ownerUid?: string,
-  candidatesData?: Candidate[]
-): Promise<void> {
-  try {
-    if (!auth.currentUser) return;
-    const uid = ownerUid || auth.currentUser.uid;
-    if (!uid || candidateIds.length === 0) return;
-
-    await withDbRetry(async () => {
-      const batch = writeBatch(db);
-      const nowIso = new Date().toISOString();
-      const candMap = new Map<string, Candidate>();
-      if (candidatesData) {
-        candidatesData.forEach((c) => candMap.set(c.id, c));
-      }
-
-      candidateIds.forEach((id) => {
-        const existingCand = candMap.get(id);
-        const updatePayload: Record<string, unknown> = {
-          archived: false,
-          ownerUid: uid,
-          updatedAt: nowIso
-        };
-        if (existingCand) {
-          Object.assign(updatePayload, existingCand, {
-            archived: false,
-            ownerUid: uid,
-            updatedAt: nowIso
-          });
-        }
-        batch.set(doc(db, "candidates", id), updatePayload, { merge: true });
-      });
-
-      await batch.commit();
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.WRITE, "candidates/bulkRestore");
-    throw e;
-  }
+export async function bulkRestoreCandidatesInCloud(candidateIds: string[], ownerUid?: string, candidatesData?: Candidate[]): Promise<void> {
+  const uid = ownerUid || auth.currentUser?.uid;
+  if (!auth.currentUser || !uid || candidateIds.length === 0) return;
+  try { await withDbRetry(async () => { const batch = writeBatch(db); const nowIso = new Date().toISOString(); const map = new Map((candidatesData || []).map(c => [c.id, c])); candidateIds.forEach(id => batch.set(doc(db, "candidates", id), { ...(map.get(id) || {}), archived: false, ownerUid: uid, updatedAt: nowIso }, { merge: true })); await batch.commit(); }); } catch (e) { handleFirestoreError(e, OperationType.WRITE, "candidates/bulkRestore"); throw e; }
 }
 
-export function subscribeToExpenses(
-  ownerUid: string,
-  onUpdate: (expenses: GeneralExpense[]) => void,
-  onError?: (err: Error) => void
-): Unsubscribe {
+export function subscribeToExpenses(ownerUid: string, onUpdate: (expenses: GeneralExpense[]) => void, onError?: (err: Error) => void): Unsubscribe {
   const q = query(collection(db, "expenses"), where("ownerUid", "==", ownerUid));
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const list: GeneralExpense[] = [];
-      snapshot.forEach((docSnap) => list.push(docSnap.data() as GeneralExpense));
-      onUpdate(list);
-    },
-    (error) => {
-      const msg = error?.message || "";
-      if (msg.includes("Database is closing") || msg.includes("Database is closing/hidden")) {
-        console.warn("Expenses snapshot paused due to temporary database closing/hidden state");
-        return;
-      }
-      handleFirestoreError(error, OperationType.LIST, "expenses");
-      onError?.(error);
-    }
-  );
+  return onSnapshot(q, snapshot => { const list: GeneralExpense[] = []; snapshot.forEach(d => list.push(d.data() as GeneralExpense)); onUpdate(list); }, error => { handleFirestoreError(error, OperationType.LIST, "expenses"); onError?.(error); });
 }
 
 export async function syncExpenseToCloud(expense: GeneralExpense, ownerUid?: string): Promise<void> {
-  if (!auth.currentUser) return;
-  const uid = ownerUid || auth.currentUser.uid;
-  if (!uid) return;
-  const path = `expenses/${expense.id}`;
+  const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid) return;
+  try { await withDbRetry(() => setDoc(doc(db, "expenses", String(expense.id)), { ...expense, ownerUid: uid }, { merge: true })); } catch (e) { handleFirestoreError(e, OperationType.WRITE, `expenses/${expense.id}`); }
+}
+
+export async function deleteExpenseFromCloud(id: string): Promise<void> { if (!auth.currentUser) return; try { await withDbRetry(() => deleteDoc(doc(db, "expenses", id))); } catch (e) { handleFirestoreError(e, OperationType.DELETE, `expenses/${id}`); } }
+
+export async function syncAllExpensesBatch(expenses: GeneralExpense[], ownerUid?: string): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid || expenses.length === 0) return; try { await withDbRetry(async () => { const batch = writeBatch(db); expenses.forEach(e => batch.set(doc(db, "expenses", String(e.id)), { ...e, ownerUid: uid }, { merge: true })); await batch.commit(); }); } catch (e) { handleFirestoreError(e, OperationType.WRITE, "expenses/batch"); } }
+
+export function subscribeToSettings(ownerUid: string, onUpdate: (settings: AgencySettings | null) => void, onError?: (err: Error) => void): Unsubscribe { const ref = doc(db, "settings", ownerUid); return onSnapshot(ref, d => onUpdate(d.exists() ? d.data() as AgencySettings : null), error => { handleFirestoreError(error, OperationType.GET, `settings/${ownerUid}`); onError?.(error); }); }
+
+export async function syncSettingsToCloud(settings: AgencySettings, ownerUid?: string): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid) return; try { await withDbRetry(() => setDoc(doc(db, "settings", uid), { ...settings, ownerUid: uid }, { merge: true })); } catch (e) { handleFirestoreError(e, OperationType.WRITE, `settings/${uid}`); } }
+
+export function subscribeToActivities(onUpdate: (activities: ActivityLogEntry[]) => void, onError?: (err: Error) => void): Unsubscribe { const uid = auth.currentUser?.uid; if (!uid) return () => {}; const q = query(collection(db, "activities"), where("ownerUid", "==", uid)); return onSnapshot(q, snapshot => { const list: ActivityLogEntry[] = []; snapshot.forEach(d => list.push(d.data() as ActivityLogEntry)); onUpdate(list); }, error => { handleFirestoreError(error, OperationType.LIST, "activities"); onError?.(error); }); }
+
+export async function syncActivityToCloud(activity: ActivityLogEntry): Promise<void> { const uid = auth.currentUser?.uid; if (!auth.currentUser || !uid) return; try { await withDbRetry(() => setDoc(doc(db, "activities", activity.id), { ...activity, ownerUid: uid }, { merge: true })); } catch (e) { handleFirestoreError(e, OperationType.WRITE, `activities/${activity.id}`); } }
+
+export async function uploadWorkerDocument(candidateId: string, folder: "passport" | "photo" | "contract" | "visa" | "medical" | "coc" | "documents", fileOrBlob: File | Blob, customFileName?: string): Promise<{ downloadUrl: string; storagePath: string; docId: string; fileName: string; sizeBytes: number; isPdf: boolean }> {
+  const uid = auth.currentUser?.uid;
+  if (!auth.currentUser || !uid) throw new Error("Authentication required");
+  const cleanCandidateId = candidateId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const fileName = (customFileName || (fileOrBlob instanceof File ? fileOrBlob.name : "document")).replace(/[^a-zA-Z0-9._-]/g, "_");
+  const docId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const path = `workers/${cleanCandidateId}/${folder}/${docId}-${fileName}`;
+  const isPdf = (fileOrBlob.type || "").toLowerCase() === "application/pdf";
+  if (isPdf && fileOrBlob.size > 3 * 1024 * 1024) throw new Error("PDF file is too large");
+  if (!isPdf && !fileOrBlob.type.toLowerCase().startsWith("image/")) throw new Error("Only images and PDF files are allowed");
+  let uploadBlob: Blob = fileOrBlob;
+  if (!isPdf) uploadBlob = await compressImage(fileOrBlob, 1400, 0.82);
+  const fileRef = storageRef(storage, path);
   try {
-    await withDbRetry(async () => {
-      await setDoc(doc(db, "expenses", String(expense.id)), { ...expense, ownerUid: uid }, { merge: true });
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.WRITE, path);
+    const snapshot = await uploadBytes(fileRef, uploadBlob, { contentType: uploadBlob.type || (isPdf ? "application/pdf" : "image/jpeg"), customMetadata: { ownerUid: uid, candidateId: cleanCandidateId, docId, folder, uploadedAt: new Date().toISOString() } });
+    const downloadUrl = await getDownloadURL(snapshot.ref);
+    return { downloadUrl, storagePath: path, docId, fileName, sizeBytes: uploadBlob.size, isPdf };
+  } catch (error) {
+    console.error("Worker document upload failed:", error instanceof Error ? error.message : String(error));
+    throw new Error("Unable to securely upload the document. Please check your connection and try again.");
   }
 }
 
-export async function deleteExpenseFromCloud(expenseId: string | number): Promise<void> {
-  const path = `expenses/${expenseId}`;
+export async function deleteWorkerDocument(storagePath?: string): Promise<void> { if (!storagePath || !storage || !auth.currentUser) return; try { await deleteObject(storageRef(storage, storagePath)); } catch (err: any) { console.warn("Could not delete worker document:", err?.message || err); } }
+
+export async function autoMigrateExistingDataToOwner(ownerUid: string, currentCandidates: Candidate[], currentExpenses: GeneralExpense[], currentSettings: AgencySettings): Promise<{ candidatesMigrated: number; expensesMigrated: number; settingsMigrated: boolean }> {
+  let candidatesMigrated = 0, expensesMigrated = 0, settingsMigrated = false;
   try {
-    if (!auth.currentUser) return;
-    await withDbRetry(async () => {
-      await deleteDoc(doc(db, "expenses", String(expenseId)));
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.DELETE, path);
-  }
-}
-
-export async function syncAllExpensesBatch(expenses: GeneralExpense[], ownerUid?: string): Promise<void> {
-  try {
-    if (!auth.currentUser) return;
-    const uid = ownerUid || auth.currentUser.uid;
-    if (!uid || expenses.length === 0) return;
-    await withDbRetry(async () => {
-      const batch = writeBatch(db);
-      expenses.forEach((exp) => {
-        batch.set(doc(db, "expenses", String(exp.id)), { ...exp, ownerUid: uid }, { merge: true });
-      });
-      await batch.commit();
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.WRITE, "expenses/batch");
-  }
-}
-
-export function subscribeToSettings(
-  ownerUid: string,
-  onUpdate: (settings: AgencySettings) => void,
-  onError?: (err: Error) => void
-): Unsubscribe {
-  const docRef = doc(db, "settings", ownerUid);
-  return onSnapshot(
-    docRef,
-    (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as AgencySettings;
-        if (data.ownerUid === ownerUid) onUpdate(data);
-      }
-    },
-    (error) => {
-      const msg = error?.message || "";
-      if (msg.includes("Database is closing") || msg.includes("Database is closing/hidden")) {
-        console.warn("Settings snapshot paused due to temporary database closing/hidden state");
-        return;
-      }
-      handleFirestoreError(error, OperationType.GET, `settings/${ownerUid}`);
-      onError?.(error);
-    }
-  );
-}
-
-export async function syncSettingsToCloud(settings: AgencySettings, ownerUid?: string): Promise<void> {
-  if (!auth.currentUser) return;
-  const uid = ownerUid || auth.currentUser.uid;
-  if (!uid) return;
-  const path = `settings/${uid}`;
-  try {
-    await withDbRetry(async () => {
-      await setDoc(doc(db, "settings", uid), { ...settings, ownerUid: uid }, { merge: true });
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.WRITE, path);
-  }
-}
-
-export function subscribeToActivities(
-  onUpdate: (activities: ActivityLogEntry[]) => void,
-  onError?: (err: Error) => void
-): Unsubscribe {
-  const q = collection(db, "activities");
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const list: ActivityLogEntry[] = [];
-      snapshot.forEach((docSnap) => {
-        list.push(docSnap.data() as ActivityLogEntry);
-      });
-      // Sort newest first
-      list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      onUpdate(list);
-    },
-    (error) => {
-      const msg = error?.message || "";
-      if (msg.includes("Database is closing") || msg.includes("Database is closing/hidden")) {
-        console.warn("Activities snapshot paused due to temporary database closing/hidden state");
-        return;
-      }
-      handleFirestoreError(error, OperationType.LIST, "activities");
-      onError?.(error);
-    }
-  );
-}
-
-export async function syncActivityToCloud(entry: ActivityLogEntry): Promise<void> {
-  if (!auth.currentUser) return;
-  const path = `activities/${entry.id}`;
-  try {
-    await withDbRetry(async () => {
-      await setDoc(doc(db, "activities", entry.id), entry, { merge: true });
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.WRITE, path);
-  }
-}
-
-export async function syncActivitiesBatchToCloud(entries: ActivityLogEntry[]): Promise<void> {
-  try {
-    if (!auth.currentUser || entries.length === 0) return;
-    await withDbRetry(async () => {
-      const batch = writeBatch(db);
-      // Limit to 450 per batch (Firestore batch limit is 500)
-      const sliced = entries.slice(0, 450);
-      sliced.forEach((item) => {
-        batch.set(doc(db, "activities", item.id), item, { merge: true });
-      });
-      await batch.commit();
-    });
-  } catch (e) {
-    handleFirestoreError(e, OperationType.WRITE, "activities/batch");
-  }
-}
-
-export type WorkerStorageFolder = "passport" | "photo" | "contract" | "visa" | "medical" | "coc" | "documents";
-
-export async function uploadWorkerDocument(
-  candidateId: string,
-  folder: WorkerStorageFolder,
-  fileOrBlob: File | Blob,
-  customFileName?: string
-): Promise<{ downloadUrl: string; storagePath: string; docId: string; fileName: string; sizeBytes: number; isPdf: boolean }> {
-  const uid = auth.currentUser?.uid || "authenticated_user";
-  const cleanCandidateId = (candidateId || "NEW").replace(/[^a-zA-Z0-9_-]/g, "_");
-  const isPdf = fileOrBlob.type.includes("pdf") || (fileOrBlob instanceof File && fileOrBlob.name.toLowerCase().endsWith(".pdf"));
-  const ext = isPdf ? "pdf" : "jpg";
-  const uniqueSuffix = Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase();
-  const docId = `DOC-${cleanCandidateId}-${folder.toUpperCase()}-${uniqueSuffix}`;
-  const fileName = customFileName || `${Date.now()}_${uniqueSuffix}.${ext}`;
-  const path = `workers/${cleanCandidateId}/${folder}/${fileName}`;
-  const sizeBytes = fileOrBlob.size;
-
-  // 1. Prepare optimized DataURL and Blob payload
-  let dataUrl: string;
-  let uploadBlob: Blob | File = fileOrBlob;
-
-  if (isPdf) {
-    if (fileOrBlob.size > 3 * 1024 * 1024) {
-      throw new Error("حجم ملف PDF يتجاوز 3 ميجابايت. يرجى اختيار ملف أصغر حجماً للأرشفة.");
-    }
-    dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error("فشل قراءة ملف PDF"));
-      reader.readAsDataURL(fileOrBlob);
-    });
-  } else {
-    // Compress image to lightweight, high-clarity JPEG (max 1400px, 0.82 quality)
-    dataUrl = await compressImage(fileOrBlob, {
-      maxWidth: 1400,
-      maxHeight: 1400,
-      quality: 0.82,
-      mimeType: "image/jpeg"
-    });
-
-    try {
-      const parts = dataUrl.split(",");
-      const mime = parts[0].match(/:(.*?);/)?.[1] || "image/jpeg";
-      const bin = atob(parts[1]);
-      const len = bin.length;
-      const u8 = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        u8[i] = bin.charCodeAt(i);
-      }
-      uploadBlob = new Blob([u8], { type: mime });
-    } catch {
-      uploadBlob = fileOrBlob;
-    }
-  }
-
-  // 2. Attempt Firebase Storage upload with a strict 3-second timeout.
-  // If the bucket exists and responds, use the remote storage URL.
-  // If the bucket is not provisioned or times out, gracefully use the high-quality DataURL.
-  if (storage) {
-    try {
-      const uploadTask = (async () => {
-        const fileRef = storageRef(storage, path);
-        const snapshot = await uploadBytes(fileRef, uploadBlob, {
-          contentType: uploadBlob.type || (isPdf ? "application/pdf" : "image/jpeg"),
-          customMetadata: {
-            ownerUid: uid,
-            candidateId: cleanCandidateId,
-            docId: docId,
-            folder: folder,
-            uploadedAt: new Date().toISOString()
-          }
-        });
-        const downloadUrl = await getDownloadURL(snapshot.ref);
-        return { downloadUrl, storagePath: path, docId, fileName, sizeBytes, isPdf };
-      })();
-
-      const timeoutTask = new Promise<null>((_, reject) =>
-        setTimeout(() => reject(new Error("Cloud Storage bucket timeout")), 3000)
-      );
-
-      const result = await Promise.race([uploadTask, timeoutTask]);
-      if (result && result.downloadUrl) {
-        return result;
-      }
-    } catch (storageErr: any) {
-      console.warn("Cloud Storage bucket not reachable, using persistent cloud-synced DataURL fallback:", storageErr?.message || storageErr);
-    }
-  }
-
-  // Fallback: Return optimized dataUrl (which syncs automatically to Firestore candidate record)
-  return {
-    downloadUrl: dataUrl,
-    storagePath: path,
-    docId,
-    fileName,
-    sizeBytes,
-    isPdf
-  };
-}
-
-export async function deleteWorkerDocument(storagePath?: string): Promise<void> {
-  if (!storagePath || !storage) return;
-  try {
-    const fileRef = storageRef(storage, storagePath);
-    await deleteObject(fileRef);
-  } catch (err: any) {
-    console.warn("Could not delete from Cloud Storage (might be local archive):", err?.message || err);
-  }
-}
-
-// Only migrate genuinely unowned legacy records. Never reassign a record that
-// already belongs to a different authenticated owner on the same device.
-export async function autoMigrateExistingDataToOwner(
-  ownerUid: string,
-  currentCandidates: Candidate[],
-  currentExpenses: GeneralExpense[],
-  currentSettings: AgencySettings
-): Promise<{ candidatesMigrated: number; expensesMigrated: number; settingsMigrated: boolean }> {
-  let candidatesMigrated = 0;
-  let expensesMigrated = 0;
-  let settingsMigrated = false;
-
-  try {
-    const candToMigrate = currentCandidates
-      .filter((c) => !c.ownerUid || c.ownerUid === ownerUid)
-      .map((c) => ({ ...c, ownerUid: ownerUid }));
-    if (candToMigrate.length > 0) {
-      await syncAllCandidatesBatch(candToMigrate, ownerUid);
-      candidatesMigrated = candToMigrate.length;
-    }
-
-    const expToMigrate = currentExpenses
-      .filter((e) => !e.ownerUid || e.ownerUid === ownerUid)
-      .map((e) => ({ ...e, ownerUid: ownerUid }));
-    if (expToMigrate.length > 0) {
-      await syncAllExpensesBatch(expToMigrate, ownerUid);
-      expensesMigrated = expToMigrate.length;
-    }
-
+    const candToMigrate = currentCandidates.filter(c => !c.ownerUid || c.ownerUid === ownerUid).map(c => ({ ...c, ownerUid }));
+    if (candToMigrate.length) { await syncAllCandidatesBatch(candToMigrate, ownerUid); candidatesMigrated = candToMigrate.length; }
+    const expToMigrate = currentExpenses.filter(e => !e.ownerUid || e.ownerUid === ownerUid).map(e => ({ ...e, ownerUid }));
+    if (expToMigrate.length) { await syncAllExpensesBatch(expToMigrate, ownerUid); expensesMigrated = expToMigrate.length; }
     const settingsOwner = (currentSettings as AgencySettings & { ownerUid?: string }).ownerUid;
-    if (!settingsOwner || settingsOwner === ownerUid) {
-      await syncSettingsToCloud({ ...currentSettings, ownerUid }, ownerUid);
-      settingsMigrated = true;
-    }
-
-    console.log(`Migration completed for owner ${ownerUid}: ${candidatesMigrated} candidates, ${expensesMigrated} expenses.`);
-  } catch (err) {
-    console.error("Data migration error:", err);
-  }
-
+    if (!settingsOwner || settingsOwner === ownerUid) { await syncSettingsToCloud({ ...currentSettings, ownerUid }, ownerUid); settingsMigrated = true; }
+  } catch (error) { console.warn("Legacy data migration encountered an issue:", error instanceof Error ? error.message : String(error)); }
   return { candidatesMigrated, expensesMigrated, settingsMigrated };
 }
