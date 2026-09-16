@@ -22,7 +22,7 @@ on:
           - debug
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-and-sign:
