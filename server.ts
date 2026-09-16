@@ -1,5 +1,4 @@
 import express from "express";
-import cors from "cors";
 import { GoogleGenAI } from "@google/genai";
 import { readFileSync, existsSync } from "fs";
 import path from "path";
@@ -62,7 +61,16 @@ async function verifyPassportScanAuth(req: express.Request, res: express.Respons
 const geminiKey = process.env.GEMINI_API_KEY;
 const ai = geminiKey ? new GoogleGenAI({ apiKey: geminiKey }) : null;
 
-app.use(cors({ origin: true, credentials: true, methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"], allowedHeaders: ["Origin", "X-Requested-With", "Content-Type", "Accept", "Authorization", "Cache-Control", "Pragma", "X-Client-Version", "X-Platform"] }));
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma, X-Client-Version, X-Platform");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  return next();
+});
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
@@ -70,36 +78,51 @@ app.get("/api/health", (_req, res) => res.json({ status: "ok", timestamp: new Da
 
 app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
   try {
-    const { imageBase64 } = req.body;
-    if (!imageBase64) return res.status(400).json({ error: "imageBase64 is required" });
-    if (!ai) return res.status(503).json({ error: "AI service not configured" });
-    const prompt = `Analyze this passport image and extract passport information. Read the MRZ exactly as visibly printed. Never invent, repair, synthesize, or reconstruct an MRZ that is not visibly present. Treat uncertain fields as empty/unknown. Return JSON including passportNumber, surname, givenNames, nationality, birthDateFormatted, expiryDateFormatted, gender, mrz, overallStatus, and validityAnalysis. overallStatus may be VERIFIED only when the visible MRZ is complete and its checksums validate.`;
-    const models = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
-    let lastError: unknown;
+    const { imageBase64, mimeType = "image/jpeg" } = req.body || {};
+    if (typeof imageBase64 !== "string" || imageBase64.length < 100) return res.status(400).json({ success: false, error: "Valid passport image is required" });
+    if (!ai) return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
+    const prompt = `Analyze this passport image for OCR and MRZ data. Never invent, repair, synthesize, reconstruct, or guess any MRZ characters or passport fields. Return JSON only. Set overallStatus to VERIFIED only when a complete visible MRZ is present and all check digits/checksums validate. If the MRZ is missing, incomplete, unreadable, or invalid, return overallStatus as NEEDS_REVIEW and preserve uncertainty rather than fabricating values. Extract visible fields only: passportNumber, surname, givenNames, nationality, dateOfBirth, sex, dateOfExpiry, issuingCountry, mrz, and confidence.`;
+    const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
+    let lastError: unknown = null;
     for (const model of models) {
       try {
-        const result = await ai.models.generateContent({ model, contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }] }], config: { responseMimeType: "application/json" } });
+        const result = await ai.models.generateContent({ model, contents: [{ role: "user", parts: [{ inlineData: { mimeType, data: imageBase64.replace(/^data:[^;]+;base64,/, "") } }, { text: prompt }] }], config: { responseMimeType: "application/json" } });
         const text = result.text?.trim();
-        if (!text) throw new Error("Empty AI response");
-        return res.json({ success: true, data: JSON.parse(text) });
-      } catch (error) { lastError = error; }
+        if (!text) throw new Error("Empty Gemini response");
+        const parsed = JSON.parse(text);
+        return res.json({ success: true, data: parsed, model });
+      } catch (error) {
+        lastError = error;
+        console.warn(`Gemini passport scan failed for ${model}:`, error instanceof Error ? error.message : "unknown error");
+      }
     }
-    console.error("All passport scan models failed:", lastError instanceof Error ? lastError.message : "unknown error");
-    return res.status(502).json({ success: false, error: "Passport scanning failed. Please retry or review the passport manually." });
+    console.error("All Gemini passport scan models failed:", lastError);
+    return res.status(502).json({ success: false, error: "Passport scanning service failed" });
   } catch (error) {
-    console.error("Passport scan error:", error instanceof Error ? error.message : "unknown error");
-    return res.status(500).json({ success: false, error: "Passport scanning failed" });
+    console.error("Passport scan request failed:", error instanceof Error ? error.message : "unknown error");
+    return res.status(500).json({ success: false, error: "Passport scan request failed" });
   }
 });
 
-app.get("/api/download-apk", (_req, res) => { const apkPath = path.join(__dirname, "android/app/build/outputs/apk/debug/app-debug.apk"); if (!existsSync(apkPath)) return res.status(404).json({ error: "APK not found" }); res.download(apkPath, "Shuayb-Agency.apk"); });
-app.get("/download/app-debug.apk", (_req, res) => { const apkPath = path.join(__dirname, "android/app/build/outputs/apk/debug/app-debug.apk"); if (!existsSync(apkPath)) return res.status(404).send("APK not found"); res.download(apkPath, "Shuayb-Agency.apk"); });
-app.get("/app-debug.apk", (_req, res) => { const apkPath = path.join(__dirname, "android/app/build/outputs/apk/debug/app-debug.apk"); if (!existsSync(apkPath)) return res.status(404).send("APK not found"); res.download(apkPath, "Shuayb-Agency.apk"); });
-app.get("/manifest.json", (_req, res) => res.sendFile(path.join(__dirname, "public/manifest.json")));
-app.get("/manifest.webmanifest", (_req, res) => res.sendFile(path.join(__dirname, "public/manifest.json")));
-app.get("/sw.js", (_req, res) => res.sendFile(path.join(__dirname, "public/sw.js")));
-app.get("/serviceworker.js", (_req, res) => res.sendFile(path.join(__dirname, "public/sw.js")));
-const distDir = path.join(__dirname, "dist");
-if (existsSync(distDir)) app.use(express.static(distDir));
-app.get("*", (req, res) => { if (req.path.startsWith("/api/")) return res.status(404).json({ error: "Not found" }); const indexPath = path.join(distDir, "index.html"); if (existsSync(indexPath)) return res.sendFile(indexPath); return res.status(404).send("Not found"); });
-app.listen(PORT, "0.0.0.0", () => console.log(`Shuayb Recruitment server running on port ${PORT}`));
+app.get("/api/download-apk", (_req, res) => {
+  const apkPath = path.join(__dirname, "public", "app-debug.apk");
+  if (!existsSync(apkPath)) return res.status(404).send("APK not found");
+  return res.download(apkPath, "shuayb-recruitment-debug.apk");
+});
+app.get("/download/app-debug.apk", (_req, res) => {
+  const apkPath = path.join(__dirname, "public", "app-debug.apk");
+  if (!existsSync(apkPath)) return res.status(404).send("APK not found");
+  return res.download(apkPath, "shuayb-recruitment-debug.apk");
+});
+app.get("/app-debug.apk", (_req, res) => {
+  const apkPath = path.join(__dirname, "public", "app-debug.apk");
+  if (!existsSync(apkPath)) return res.status(404).send("APK not found");
+  return res.download(apkPath, "shuayb-recruitment-debug.apk");
+});
+
+app.get("/manifest.webmanifest", (_req, res) => res.sendFile(path.join(__dirname, "public", "manifest.webmanifest")));
+app.get("/sw.js", (_req, res) => res.sendFile(path.join(__dirname, "public", "sw.js")));
+app.use(express.static(path.join(__dirname, "dist")));
+app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "dist", "index.html")));
+
+app.listen(PORT, "0.0.0.0", () => console.log(`Server running on http://0.0.0.0:${PORT}`));
