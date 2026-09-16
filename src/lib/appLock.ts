@@ -2,6 +2,7 @@ import { Capacitor } from "@capacitor/core";
 import { NativeBiometric } from "@capgo/capacitor-native-biometric";
 
 export const APP_LOCK_STORAGE_KEY = "shuayb_app_lock_enabled";
+export const APP_LOCK_CHANGED_EVENT = "shuayb:app-lock-changed";
 
 export function isNativeApp(): boolean {
   return Capacitor.isNativePlatform();
@@ -19,6 +20,7 @@ export function setAppLockEnabled(enabled: boolean): void {
   } else {
     localStorage.removeItem(APP_LOCK_STORAGE_KEY);
   }
+  window.dispatchEvent(new Event(APP_LOCK_CHANGED_EVENT));
 }
 
 export async function canUseDeviceAuthentication(): Promise<boolean> {
