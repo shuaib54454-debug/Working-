@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # One-time migration: remove synthetic passport approval paths.
       - name: Remove synthetic passport approval path
         shell: bash
         run: |
