@@ -1,565 +1,172 @@
 import express from "express";
-import path from "path";
-import fs from "fs";
-import { createServer as createViteServer } from "vite";
+import cors from "cors";
 import { GoogleGenAI } from "@google/genai";
-import { initializeApp, getApps, App } from "firebase-admin/app";
-import { getAuth, Auth } from "firebase-admin/auth";
+import { readFileSync, existsSync } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { getAuth } from "firebase-admin/auth";
+import { initializeApp, cert, getApps, App as FirebaseAdminApp } from "firebase-admin/app";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+interface AuthenticatedUser {
+  uid: string;
+  email?: string;
+  [key: string]: unknown;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AuthenticatedUser;
+    }
+  }
+}
 
 const app = express();
+const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 
-// The PORT value (3000) is hardcoded by the infrastructure for container routing
-const PORT = 3000;
+const configPath = path.join(__dirname, "firebase-applet-config.json");
+let firebaseConfig: any = {};
+try {
+  firebaseConfig = JSON.parse(readFileSync(configPath, "utf-8"));
+} catch {
+  console.warn("firebase-applet-config.json could not be loaded; Firebase auth may be unavailable.");
+}
 
-// Read firebase-applet-config.json for active project configuration
-function getActiveFirebaseProjectId(): string {
+const PRIMARY_PROJECT_ID = String(firebaseConfig?.projectId || "");
+const ALLOWED_PROJECT_IDS = new Set(
+  [PRIMARY_PROJECT_ID, ...(Array.isArray(firebaseConfig?.allowedProjectIds) ? firebaseConfig.allowedProjectIds : [])]
+    .map(String)
+    .filter(Boolean),
+);
+
+const firebaseApps = new Map<string, FirebaseAdminApp>();
+
+function getFirebaseAuthForProject(projectId: string) {
+  if (!ALLOWED_PROJECT_IDS.has(projectId)) {
+    throw new Error("Unauthorized Firebase project");
+  }
+
+  let firebaseApp = firebaseApps.get(projectId);
+  if (!firebaseApp) {
+    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    if (!serviceAccountJson) {
+      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not configured");
+    }
+    const serviceAccount = JSON.parse(serviceAccountJson);
+    if (String(serviceAccount.project_id || "") !== projectId) {
+      throw new Error("Firebase service account project mismatch");
+    }
+    firebaseApp = getApps().find((candidate) => candidate.name === `auth-${projectId}`);
+    if (!firebaseApp) {
+      firebaseApp = initializeApp({ credential: cert(serviceAccount), projectId }, `auth-${projectId}`);
+    }
+    firebaseApps.set(projectId, firebaseApp);
+  }
+  return getAuth(firebaseApp);
+}
+
+function getTokenProjectId(idToken: string): string {
+  const parts = idToken.split(".");
+  if (parts.length !== 3) throw new Error("Malformed Firebase ID token");
+  const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf-8"));
+  const projectId = typeof payload?.aud === "string" ? payload.aud : "";
+  if (!projectId || !ALLOWED_PROJECT_IDS.has(projectId)) {
+    throw new Error("Unauthorized Firebase project");
+  }
+  return projectId;
+}
+
+async function verifyPassportScanAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ success: false, error: "Authentication required" });
+  }
+
+  const idToken = authHeader.slice("Bearer ".length).trim();
+  if (!idToken || idToken === "guest" || idToken === "applet-agency-session" || idToken.startsWith("local-mode-user:")) {
+    return res.status(401).json({ success: false, error: "A verified Firebase ID token is required" });
+  }
+
   try {
-    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-    if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      if (config.projectId) {
-        return config.projectId;
-      }
-    }
-  } catch (err) {
-    console.warn("Could not read firebase-applet-config.json:", err);
+    const projectId = getTokenProjectId(idToken);
+    const decoded = await getFirebaseAuthForProject(projectId).verifyIdToken(idToken, true);
+    req.user = decoded;
+    return next();
+  } catch (error) {
+    console.warn("Passport scan authentication failed:", error instanceof Error ? error.message : "unknown error");
+    return res.status(401).json({ success: false, error: "Invalid or expired authentication token" });
   }
-  return "crack-petal-506818-c8";
 }
 
-const PRIMARY_PROJECT_ID = getActiveFirebaseProjectId();
+const geminiKey = process.env.GEMINI_API_KEY;
+const ai = geminiKey ? new GoogleGenAI({ apiKey: geminiKey }) : null;
 
-// Known valid projects for this applet
-const ALLOWED_PROJECT_IDS = new Set<string>([
-  PRIMARY_PROJECT_ID,
-  "crack-petal-506818-c8"
-]);
-if (process.env.FIREBASE_PROJECT_ID) {
-  ALLOWED_PROJECT_IDS.add(process.env.FIREBASE_PROJECT_ID);
-}
-
-// Registry of Firebase Admin Auth instances per project ID
-const authInstances = new Map<string, Auth>();
-
-function getFirebaseAuthForProject(projectId: string): Auth {
-  if (authInstances.has(projectId)) {
-    return authInstances.get(projectId)!;
-  }
-
-  const appName = `app-${projectId}`;
-  const existingApps = getApps();
-  let app = existingApps.find(
-    (a) => a.name === appName || (a.name === "[DEFAULT]" && a.options.projectId === projectId)
-  );
-
-  if (!app) {
-    try {
-      if (existingApps.length === 0) {
-        app = initializeApp({ projectId });
-      } else {
-        app = initializeApp({ projectId }, appName);
-      }
-    } catch (e) {
-      console.warn(`Error initializing app for ${projectId}, falling back:`, e);
-      app = existingApps[0] || initializeApp({ projectId }, `fallback-${Date.now()}`);
-    }
-  }
-
-  const auth = getAuth(app);
-  authInstances.set(projectId, auth);
-  return auth;
-}
-
-// Enable CORS for Web and Mobile Capacitor WebViews (Android localhost, Capacitor scheme, etc.)
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin) {
-    res.header("Access-Control-Allow-Origin", origin);
-  } else {
-    res.header("Access-Control-Allow-Origin", "*");
-  }
-  res.header("Access-Control-Allow-Credentials", "true");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
-  res.header(
-    "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma, X-Client-Version, X-Platform"
-  );
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-  next();
-});
-
-// Body parser for JSON and large base64 image payloads (up to 25MB)
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+  allowedHeaders: ["Origin", "X-Requested-With", "Content-Type", "Accept", "Authorization", "Cache-Control", "Pragma", "X-Client-Version", "X-Platform"],
+}));
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
-// Lazy Google Gen AI helper (server-side secret only)
-let aiClient: GoogleGenAI | null = null;
-function getAIClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!aiClient) {
-    aiClient = new GoogleGenAI({ apiKey });
-  }
-  return aiClient;
-}
-
-/**
- * Strict Server-Side Firebase ID Token Verification Middleware
- * - Cryptographically verifies the JWT against Firebase / Google public certs
- * - Validates audience against FIREBASE_PROJECT_ID and expiration
- * - No Authorization Bearer Token -> HTTP 401 Unauthorized
- * - Invalid or Expired Token -> HTTP 401 Unauthorized
- * - Valid Token -> Attaches authenticated user to req.user and proceeds
- */
-async function verifyFirebaseIdToken(
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction
-) {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({
-      success: false,
-      error: "Unauthorized: Missing or malformed Authorization header (Bearer token required)."
-    });
-  }
-
-  const idToken = authHeader.split("Bearer ")[1]?.trim();
-  if (!idToken) {
-    return res.status(401).json({
-      success: false,
-      error: "Unauthorized: Empty token provided."
-    });
-  }
-
-  // 1. Support authenticated Local-mode administrative users
-  if (idToken.startsWith("local-mode-user:")) {
-    const parts = idToken.split(":");
-    (req as any).user = {
-      uid: decodeURIComponent(parts[1] || "local-admin"),
-      email: decodeURIComponent(parts[2] || "admin@agency.com"),
-      isLocal: true
-    };
-    return next();
-  }
-
-  try {
-    let decodedToken: any = null;
-
-    // 2. Decode JWT payload to detect project ID ("aud") dynamically
-    let tokenAud = PRIMARY_PROJECT_ID;
-    try {
-      const parts = idToken.split(".");
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
-        if (payload?.aud) {
-          tokenAud = payload.aud;
-        }
-      }
-    } catch (e) {
-      // ignore parse error, verifyIdToken will catch malformed token
-    }
-
-    // 3. Primary verification: Standard cryptographic JWT verification via Firebase Admin SDK
-    try {
-      const authService = getFirebaseAuthForProject(tokenAud);
-      decodedToken = await authService.verifyIdToken(idToken, false);
-    } catch (adminErr: any) {
-      console.warn(`Primary Admin SDK verifyIdToken for project ${tokenAud} failed:`, adminErr?.message || adminErr);
-      
-      // 4. Resilient fallback: Verify with Google's public tokeninfo endpoint
-      try {
-        const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
-        if (tokenInfoRes.ok) {
-          const tokenInfo = await tokenInfoRes.json();
-          if (
-            tokenInfo &&
-            (ALLOWED_PROJECT_IDS.has(tokenInfo.aud) || tokenInfo.aud === tokenAud) &&
-            Number(tokenInfo.exp) > Date.now() / 1000
-          ) {
-            decodedToken = {
-              uid: tokenInfo.sub || tokenInfo.user_id,
-              email: tokenInfo.email,
-              email_verified: tokenInfo.email_verified === "true" || tokenInfo.email_verified === true
-            };
-          }
-        }
-      } catch (fallbackErr) {
-        console.warn("TokenInfo fallback error:", fallbackErr);
-      }
-    }
-
-    if (!decodedToken || !decodedToken.uid) {
-      return res.status(401).json({
-        success: false,
-        error: "Unauthorized: Invalid or expired Firebase ID token.",
-        code: "UNAUTHORIZED"
-      });
-    }
-
-    // Attach verified user identity to request object
-    (req as any).user = decodedToken;
-    return next();
-  } catch (authError: any) {
-    console.warn("Firebase ID Token verification failed:", authError?.message || authError);
-
-    const errorMessage =
-      authError?.code === "auth/id-token-expired"
-        ? "Unauthorized: Token has expired. Please refresh session."
-        : authError?.code === "auth/id-token-revoked"
-        ? "Unauthorized: Token has been revoked."
-        : "Unauthorized: Invalid Firebase ID token.";
-
-    return res.status(401).json({
-      success: false,
-      error: errorMessage,
-      code: authError?.code || "UNAUTHORIZED"
-    });
-  }
-}
-
-// Explicit Public Manifest & PWA Assets for Store Packagers (PWABuilder / Google Play / Bubblewrap)
-app.get(["/manifest.json", "/manifest.webmanifest"], (req, res) => {
-  res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Cache-Control", "public, max-age=3600");
-  const p1 = path.join(process.cwd(), "public", "manifest.json");
-  const p2 = path.join(process.cwd(), "dist", "manifest.json");
-  if (fs.existsSync(p1)) return res.sendFile(p1);
-  if (fs.existsSync(p2)) return res.sendFile(p2);
-  return res.status(404).end();
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok", service: "shuayb-recruitment-api", timestamp: new Date().toISOString() });
 });
 
-app.get("/sw.js", (req, res) => {
-  res.setHeader("Content-Type", "application/javascript; charset=utf-8");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Cache-Control", "public, max-age=0");
-  const p1 = path.join(process.cwd(), "public", "sw.js");
-  const p2 = path.join(process.cwd(), "dist", "sw.js");
-  if (fs.existsSync(p1)) return res.sendFile(p1);
-  if (fs.existsSync(p2)) return res.sendFile(p2);
-  return res.status(404).end();
-});
-
-/**
- * Health Check Endpoint
- * Available publicly without session cookies or AI Studio developer proxy.
- * Does NOT leak any private secrets or API keys.
- */
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    service: "shuayb-agency-backend",
-    hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
-    projectId: PRIMARY_PROJECT_ID,
-    allowedProjects: Array.from(ALLOWED_PROJECT_IDS)
-  });
-});
-
-/**
- * Resilient Authentication Middleware specifically for Passport Scanning
- * - Allows authenticated Firebase users (Bearer token)
- * - Allows local-mode users (local-mode-user token)
- * - Allows internal applet sessions (Bearer applet-agency-session)
- * - Never returns 401 to block legitimate staff from processing passports
- */
-async function verifyPassportScanAuth(
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction
-) {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    (req as any).user = { uid: "applet-session", email: "agency@internal.app", isApplet: true };
-    return next();
-  }
-
-  const idToken = authHeader.split("Bearer ")[1]?.trim();
-  if (!idToken || idToken === "applet-agency-session" || idToken === "guest") {
-    (req as any).user = { uid: "applet-session", email: "agency@internal.app", isApplet: true };
-    return next();
-  }
-
-  if (idToken.startsWith("local-mode-user:")) {
-    const parts = idToken.split(":");
-    (req as any).user = {
-      uid: decodeURIComponent(parts[1] || "local-admin"),
-      email: decodeURIComponent(parts[2] || "admin@agency.com"),
-      isLocal: true
-    };
-    return next();
-  }
-
-  try {
-    let tokenAud = PRIMARY_PROJECT_ID;
-    const parts = idToken.split(".");
-    if (parts.length === 3) {
-      try {
-        const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
-        if (payload?.aud) tokenAud = payload.aud;
-      } catch {}
-    }
-
-    try {
-      const authService = getFirebaseAuthForProject(tokenAud);
-      const decoded = await authService.verifyIdToken(idToken, false);
-      (req as any).user = decoded;
-      return next();
-    } catch {
-      (req as any).user = { uid: "verified-agency-user", email: "user@agency.app" };
-      return next();
-    }
-  } catch {
-    (req as any).user = { uid: "applet-session", email: "agency@internal.app" };
-    return next();
-  }
-}
-
-/**
- * Passport Scanning API Route with Gemini Vision + MRZ extraction
- * Protected by Resilient Server-Side Authentication
- */
 app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
   try {
-    const { imageBase64, mimeType } = req.body;
+    const imageBase64 = typeof req.body?.imageBase64 === "string" ? req.body.imageBase64 : "";
+    if (!imageBase64) return res.status(400).json({ success: false, error: "imageBase64 is required" });
+    if (!ai) return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
 
-    if (!imageBase64) {
-      return res.status(400).json({ error: "No image provided" });
-    }
+    const models = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
+    const prompt = `Analyze this passport image for OCR only. Extract visible passport data and the machine readable zone (MRZ) exactly as printed. Never invent, repair, synthesize, or reconstruct an MRZ that is not visibly present. Treat any uncertain field as empty/unknown. Return structured JSON with passportNumber, surname, givenNames, nationality, birthDateFormatted, expiryDateFormatted, gender, mrz, overallStatus, and validityAnalysis. overallStatus may be VERIFIED only when the visible MRZ is complete and its checksums validate.`;
 
-    const ai = getAIClient();
-    if (!ai) {
-      return res.status(503).json({
-        error: "GEMINI_API_KEY is not configured on the server environment.",
-        fallback: false
-      });
-    }
-
-    // Log authorized request
-    const user = (req as any).user;
-    console.log(`[API] Authorized passport scan request by: ${user?.email || user?.uid}`);
-
-    // Clean base64 string
-    const base64Data = imageBase64.replace(/^data:image\/[a-z0-9.+]+;base64,/, "");
-
-    const prompt = `You are an expert international passport and document reader for recruitment agencies complying with ICAO Doc 9303.
-CRITICAL INSTRUCTION - RECRUITMENT BIODATA & COMPOSITE IMAGES:
-The image frequently contains a candidate photograph (such as a domestic worker standing in uniform or everyday clothes) alongside a photograph/scan of their passport page (Ethiopian, Kenyan, Ugandan, Filipino, etc.).
-1. LOCATE THE PASSPORT SECTION in the image (it may be on the left, right, top, or bottom).
-2. Read all text from the passport document with maximum precision:
-   - "firstName": Given / First Name (e.g. ABEBECH, MESERET, FATIMA, ASTER, etc.)
-   - "lastName": Surname / Father's / Grandfather's Name (e.g. ALEMU, TESFAYE, BEKELE, TADESSE, etc.)
-   - "fullName": Full Name in English
-   - "fullNameArabic": Arabic transliteration if available or transliterated
-   - "passportNumber": Passport number (e.g. starting with EP in Ethiopian passports, or letters and digits)
-   - "birthDate": Date of birth in YYYY-MM-DD format (convert any DD/MM/YYYY or DD MMM YYYY)
-   - "expiryDate": Passport expiry date in YYYY-MM-DD format
-   - "issueDate": Passport issue date in YYYY-MM-DD format
-   - "gender": "female" or "male" (for housemaids it is typically female)
-   - "nationality": Country of citizenship (e.g. "إثيوبيا" for Ethiopia, "كينيا" for Kenya, etc.)
-   - "placeOfBirth": Place of birth or city if visible
-   - "jobTitle": Job profession (e.g. "عاملة منزلية" / Housemaid, "سائق", etc.)
-   - "mrzLine1": Standard 44-character line 1 starting with P< (e.g. P<ETH... or P<SAU...)
-   - "mrzLine2": Standard 44-character line 2 containing passport number, birth date, expiry date and check digits.
-   If the MRZ at the bottom of the passport is slightly obscured or rotated, reconstruct valid 44-character MRZ lines using the visual fields.
-
-Return ONLY valid JSON strictly adhering to this structure without markdown fences:
-{
-  "mrzLine1": "P<...",
-  "mrzLine2": "...",
-  "visualZone": {
-    "firstName": "First / Given Name",
-    "lastName": "Surname / Family Name",
-    "fullName": "Full Name in English",
-    "fullNameArabic": "الاسم الكامل بالعربية",
-    "passportNumber": "Passport Number",
-    "birthDate": "YYYY-MM-DD",
-    "expiryDate": "YYYY-MM-DD",
-    "issueDate": "YYYY-MM-DD",
-    "gender": "female",
-    "nationality": "إثيوبيا",
-    "placeOfBirth": "Place of birth",
-    "jobTitle": "عاملة منزلية"
-  }
-}
-
-Do NOT return all nulls if any text, document, or passport page is discernible.`;
-
-    // Active, high-speed multimodal models with fallbacks (gemini-3.1-flash-lite first for high availability, separate quota, and zero 503 errors)
-    const modelsToTry = [
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-      "gemini-3.8-flash"
-    ];
-
-    let lastError: any = null;
-    let parsedResult: any = null;
-
-    for (const modelName of modelsToTry) {
+    let lastError: unknown;
+    for (const model of models) {
       try {
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  inlineData: {
-                    data: base64Data,
-                    mimeType: mimeType || "image/jpeg"
-                  }
-                },
-                {
-                  text: prompt
-                }
-              ]
-            }
-          ],
-          config: {
-            responseMimeType: "application/json"
-          }
+        const result = await ai.models.generateContent({
+          model,
+          contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }] }],
+          config: { responseMimeType: "application/json" },
         });
-
-        const responseText = response.text || "";
-        let cleanedJson = responseText.trim();
-        if (cleanedJson.includes("```")) {
-          cleanedJson = cleanedJson.replace(/^```[a-z]*\s*/i, "").replace(/```\s*$/i, "").trim();
-        }
-        const firstBrace = cleanedJson.indexOf("{");
-        const lastBrace = cleanedJson.lastIndexOf("}");
-        if (firstBrace !== -1 && lastBrace !== -1) {
-          cleanedJson = cleanedJson.slice(firstBrace, lastBrace + 1);
-        }
-        parsedResult = JSON.parse(cleanedJson);
-        if (parsedResult) {
-          console.log(`[API] Successfully scanned passport using model: ${modelName}`);
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Model ${modelName} encountered error, attempting fallback:`, err?.message || err);
-      }
-
-      if (parsedResult) {
-        break;
+        const text = result.text?.trim();
+        if (!text) throw new Error("Empty AI response");
+        const parsed = JSON.parse(text);
+        return res.json({ success: true, data: parsed });
+      } catch (error) {
+        lastError = error;
       }
     }
 
-    if (!parsedResult) {
-      // Graceful fallback: Never crash with 500 when Gemini API is busy or experiencing demand spikes.
-      console.warn("[API] Gemini models were temporarily busy or reached quota limit. Returning resilient fallback structure.");
-      return res.json({
-        success: true,
-        fallbackMode: true,
-        message: "خدمة الذكاء الاصطناعي تحت ضغط طلبات مؤقت. تم تفعيل نمط التعبئة السريعة لمتابعة الاعتماد.",
-        data: {
-          mrzLine1: "",
-          mrzLine2: "",
-          visualZone: {
-            nationality: "إثيوبيا",
-            jobTitle: "عاملة منزلية",
-            gender: "female"
-          }
-        }
-      });
-    }
-
-    // Server-side normalization & smart fallback for partial data
-    if (parsedResult.visualZone) {
-      const vz = parsedResult.visualZone;
-      // If fullName exists but not firstName / lastName
-      if ((!vz.firstName || !vz.lastName) && vz.fullName) {
-        const parts = vz.fullName.trim().split(/\s+/);
-        if (parts.length > 1) {
-          vz.firstName = vz.firstName || parts.slice(0, -1).join(" ");
-          vz.lastName = vz.lastName || parts[parts.length - 1];
-        } else {
-          vz.firstName = vz.firstName || parts[0];
-          vz.lastName = vz.lastName || parts[0];
-        }
-      }
-      // Nationality fallback for Shuayb agency specialization
-      if (!vz.nationality || vz.nationality.toLowerCase().includes("ethiop")) {
-        vz.nationality = "إثيوبيا";
-      }
-      if (!vz.jobTitle) {
-        vz.jobTitle = vz.gender === "male" ? "سائق / عامل" : "عاملة منزلية";
-      }
-    }
-
-    return res.json({
-      success: true,
-      data: parsedResult
-    });
-  } catch (error: any) {
-    console.error("Error in /api/scan-passport:", error);
-    return res.status(500).json({
-      error: error.message || "Failed to process passport image",
-      fallback: false
-    });
+    console.error("All passport scan models failed:", lastError instanceof Error ? lastError.message : "unknown error");
+    return res.status(502).json({ success: false, error: "Passport scanning failed. Please retry or review the passport manually." });
+  } catch (error) {
+    console.error("Passport scan error:", error instanceof Error ? error.message : "unknown error");
+    return res.status(500).json({ success: false, error: "Passport scanning failed" });
   }
 });
 
-// Explicit PWA Endpoints for PWABuilder and Service Worker registration
-app.get(["/sw.js", "/serviceworker.js"], (req, res) => {
-  const swPath = path.join(process.cwd(), "public/sw.js");
-  if (fs.existsSync(swPath)) {
-    res.setHeader("Content-Type", "application/javascript");
-    res.setHeader("Service-Worker-Allowed", "/");
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    return res.sendFile(swPath);
-  }
-  res.status(404).send("Service worker not found");
-});
-
-app.get(["/manifest.json", "/manifest.webmanifest"], (req, res) => {
-  const manifestPath = path.join(process.cwd(), "public/manifest.json");
-  if (fs.existsSync(manifestPath)) {
-    res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    return res.sendFile(manifestPath);
-  }
-  res.status(404).send("Manifest not found");
-});
-
-// Route to download compiled Android APK if present
-app.get(["/api/download-apk", "/download/app-debug.apk", "/app-debug.apk"], (req, res) => {
-  const apkPath = path.join(process.cwd(), "android/app/build/outputs/apk/debug/app-debug.apk");
-  if (fs.existsSync(apkPath)) {
-    res.setHeader("Content-Disposition", 'attachment; filename="Shuayb-Agency.apk"');
-    res.setHeader("Content-Type", "application/vnd.android.package-archive");
-    return res.sendFile(apkPath);
-  }
-  return res.status(404).json({
-    error: "APK not built yet.",
-    path: apkPath
-  });
-});
-
-async function startServer() {
-  // Vite middleware for development mode
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa"
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Shuayb Agency Server] Listening on http://0.0.0.0:${PORT} (ENV: ${process.env.NODE_ENV || "development"})`);
-  });
+const publicDir = path.join(__dirname, "public");
+const distDir = path.join(__dirname, "dist");
+if (existsSync(distDir)) {
+  app.use(express.static(distDir));
+}
+if (existsSync(publicDir)) {
+  app.use(express.static(publicDir));
 }
 
-startServer();
+app.get("*", (req, res) => {
+  if (req.path.startsWith("/api/")) return res.status(404).json({ success: false, error: "Not found" });
+  const indexPath = path.join(distDir, "index.html");
+  if (existsSync(indexPath)) return res.sendFile(indexPath);
+  return res.status(404).send("Not found");
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Shuayb Recruitment API listening on port ${PORT}`);
+});
