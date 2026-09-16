@@ -1,5 +1,5 @@
 import { Capacitor } from "@capacitor/core";
-import { NativeBiometric } from "@capgo/capacitor-native-biometric";
+import { BiometryType, NativeBiometric } from "@capgo/capacitor-native-biometric";
 
 export const APP_LOCK_STORAGE_KEY = "shuayb_app_lock_enabled";
 export const APP_LOCK_CHANGED_EVENT = "shuayb:app-lock-changed";
@@ -43,7 +43,12 @@ export async function authenticateToUnlock(): Promise<boolean> {
       title: "فتح تطبيق شعيب",
       subtitle: "التحقق من هوية مستخدم الجهاز",
       description: "استخدم البصمة أو رمز PIN/قفل الجهاز للمتابعة.",
-      useFallback: true,
+      allowedBiometryTypes: [
+        BiometryType.FINGERPRINT,
+        BiometryType.FACE_AUTHENTICATION,
+        BiometryType.IRIS_AUTHENTICATION,
+        BiometryType.DEVICE_CREDENTIAL
+      ],
       maxAttempts: 5
     });
     return true;
