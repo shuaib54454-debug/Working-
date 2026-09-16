@@ -10,10 +10,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
+const OWNER_EMAIL = String(process.env.OWNER_EMAIL || "shuaib54454@gmail.com").trim().toLowerCase();
 
 const configPath = path.join(__dirname, "firebase-applet-config.json");
 let firebaseConfig: any = {};
-try { firebaseConfig = JSON.parse(readFileSync(configPath, "utf-8")); } catch (error) { console.error("Failed to load Firebase config:", error); }
+try { firebaseConfig = JSON.parse(readFileSync(configPath, "utf-8")); } catch (error) { console.error("Failed to load Firebase config"); }
 const PRIMARY_PROJECT_ID = String(firebaseConfig?.projectId || "");
 const ALLOWED_PROJECT_IDS = new Set<string>([PRIMARY_PROJECT_ID, ...(Array.isArray(firebaseConfig?.allowedProjectIds) ? firebaseConfig.allowedProjectIds : [])].filter(Boolean).map(String));
 const firebaseApps = new Map<string, FirebaseAdminApp>();
@@ -50,6 +51,8 @@ async function verifyPassportScanAuth(req: express.Request, res: express.Respons
   try {
     const projectId = getTokenProjectId(idToken);
     const decoded = await getFirebaseAuthForProject(projectId).verifyIdToken(idToken, true);
+    const email = typeof decoded.email === "string" ? decoded.email.trim().toLowerCase() : "";
+    if (!email || email !== OWNER_EMAIL) return res.status(403).json({ success: false, error: "Owner account required" });
     req.user = decoded;
     return next();
   } catch (error) {
@@ -96,7 +99,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
         console.warn(`Gemini passport scan failed for ${model}:`, error instanceof Error ? error.message : "unknown error");
       }
     }
-    console.error("All Gemini passport scan models failed:", lastError);
+    console.error("All Gemini passport scan models failed:", lastError instanceof Error ? lastError.message : "unknown error");
     return res.status(502).json({ success: false, error: "Passport scanning service failed" });
   } catch (error) {
     console.error("Passport scan request failed:", error instanceof Error ? error.message : "unknown error");
