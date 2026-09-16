@@ -32,7 +32,6 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 
   handleReset = () => {
-    localStorage.removeItem("shuayb_local_user");
     window.location.reload();
   };
 
@@ -45,7 +44,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
           </div>
           <h1 className="text-xl font-black text-white mb-2">حدث خطأ أثناء تحميل المعاينة</h1>
           <p className="text-stone-300 text-xs max-w-md mb-6 leading-relaxed">
-            {this.state.error?.message || "تعذر إكمال تصيير الصفحة، يمكنك إعادة التحميل أو إعادة تعيين الجلسة."}
+            {this.state.error?.message || "تعذر إكمال تصيير الصفحة، يمكنك إعادة التحميل."}
           </p>
           <button
             type="button"
