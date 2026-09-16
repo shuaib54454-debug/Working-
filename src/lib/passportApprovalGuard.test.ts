@@ -71,6 +71,7 @@ describe("canApprovePassportData", () => {
     }).allowed, false);
   });
 
+  // Production approval must never bypass expiry validation.
   it("rejects an expired passport even when an override is requested", () => {
     assert.equal(canApprovePassportData({
       hasVerifiedMrz: true,
