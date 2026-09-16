@@ -6,37 +6,30 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    function isSignedIn() {
-      return request.auth != null && request.auth.uid != null;
+    // Current product phase: one owner account only.
+    // Employee accounts can be introduced later with a separate role model.
+    function isOwner() {
+      return request.auth != null &&
+        request.auth.uid != null &&
+        request.auth.token.email == "shuaib54454@gmail.com";
     }
 
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
-    function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.admin == true ||
-        request.auth.token.email == "shuaib54454@gmail.com" ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
-    }
-
-    // Existing document must belong to the caller unless the caller is an admin.
     function ownsExistingDocument() {
-      return isSignedIn() && resource != null && resource.data.ownerUid == request.auth.uid;
+      return isOwner() && resource != null && resource.data.ownerUid == request.auth.uid;
     }
 
-    // New candidate/expense documents must be explicitly owned by the caller.
     function ownsNewDocument() {
-      return isSignedIn() &&
+      return isOwner() &&
         request.resource.data.ownerUid is string &&
         request.resource.data.ownerUid == request.auth.uid;
     }
 
-    // Updates must preserve ownership. A caller can never change ownerUid to another UID.
     function ownsUpdatedDocument() {
-      return isSignedIn() &&
+      return isOwner() &&
         ownsExistingDocument() &&
         request.resource.data.ownerUid is string &&
         request.resource.data.ownerUid == request.auth.uid;
@@ -44,66 +37,56 @@ service cloud.firestore {
 
     // 1. Candidates
     match /candidates/{candidateId} {
-      allow get, list: if isAdmin() || ownsExistingDocument();
-      allow create: if isAdmin() || (isValidId(candidateId) && ownsNewDocument());
-      allow update: if isAdmin() || (isValidId(candidateId) && ownsUpdatedDocument());
-      allow delete: if isAdmin() || (isValidId(candidateId) && ownsExistingDocument());
+      allow get, list: if ownsExistingDocument();
+      allow create: if isValidId(candidateId) && ownsNewDocument();
+      allow update: if isValidId(candidateId) && ownsUpdatedDocument();
+      allow delete: if isValidId(candidateId) && ownsExistingDocument();
     }
 
     // 2. Operating expenses
     match /expenses/{expenseId} {
-      allow get, list: if isAdmin() || ownsExistingDocument();
-      allow create: if isAdmin() || (isValidId(expenseId) && ownsNewDocument());
-      allow update: if isAdmin() || (isValidId(expenseId) && ownsUpdatedDocument());
-      allow delete: if isAdmin() || (isValidId(expenseId) && ownsExistingDocument());
+      allow get, list: if ownsExistingDocument();
+      allow create: if isValidId(expenseId) && ownsNewDocument();
+      allow update: if isValidId(expenseId) && ownsUpdatedDocument();
+      allow delete: if isValidId(expenseId) && ownsExistingDocument();
     }
 
-    // 3. Agency settings are isolated by document ID/ownerUid.
+    // 3. Agency settings: only the owner's UID document is accessible.
     match /settings/{settingId} {
-      allow get: if isAdmin() || (
-        isSignedIn() &&
+      allow get: if isOwner() &&
         settingId == request.auth.uid &&
         resource != null &&
-        resource.data.ownerUid == request.auth.uid
-      );
-      allow list: if isAdmin();
-      allow create: if isAdmin() || (
-        isSignedIn() &&
+        resource.data.ownerUid == request.auth.uid;
+      allow list: if false;
+      allow create: if isOwner() &&
         settingId == request.auth.uid &&
-        request.resource.data.ownerUid == request.auth.uid
-      );
-      allow update: if isAdmin() || (
-        isSignedIn() &&
+        request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isOwner() &&
         settingId == request.auth.uid &&
         resource != null &&
         resource.data.ownerUid == request.auth.uid &&
-        request.resource.data.ownerUid == request.auth.uid
-      );
-      allow delete: if isAdmin() || (
-        isSignedIn() &&
+        request.resource.data.ownerUid == request.auth.uid;
+      allow delete: if isOwner() &&
         settingId == request.auth.uid &&
         resource != null &&
-        resource.data.ownerUid == request.auth.uid
-      );
+        resource.data.ownerUid == request.auth.uid;
     }
 
-    // 4. Admin registry: users can only read their own admin record; admins can manage all.
+    // 4. No employee/admin registry in the single-owner phase.
     match /admins/{adminId} {
-      allow read: if isAdmin() || (isSignedIn() && adminId == request.auth.uid);
-      allow write: if isAdmin();
+      allow read, write: if false;
     }
 
-    // 5. System health document is not a public write surface.
+    // 5. System health/configuration is owner-only.
     match /_system/{docId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow read, write: if isOwner();
     }
 
-    // 6. Global audit and activity log
+    // 6. Audit/activity log is private to the owner in the current phase.
     match /activities/{activityId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(activityId);
-      allow update, delete: if isAdmin();
+      allow get, list: if isOwner();
+      allow create: if isOwner() && isValidId(activityId);
+      allow update, delete: if isOwner();
     }
   }
 }
