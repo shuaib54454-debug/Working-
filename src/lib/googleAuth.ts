@@ -9,29 +9,19 @@ import {
 } from "firebase/auth";
 import firebaseConfig from "../../firebase-applet-config.json";
 
-// Initialize Firebase App safely (singleton)
+const OWNER_EMAIL = "shuaib54454@gmail.com";
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
-// Request only the Google Workspace scopes actually used by this application.
-// - Sheets scope: create/read/write agency spreadsheets.
-// - Drive readonly: list/read spreadsheet files visible to the signed-in user.
-// - Calendar events: create/read/delete the agency's appointment events.
-// No broad Drive write/full-access scope is requested.
 export const provider = new GoogleAuthProvider();
 export const WORKSPACE_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/calendar.events"
 ];
+WORKSPACE_SCOPES.forEach(scope => provider.addScope(scope));
 
-WORKSPACE_SCOPES.forEach(scope => {
-  provider.addScope(scope);
-});
-
-// Flag to track sign-in in progress
 let isSigningIn = false;
-// In-memory cache for OAuth access token (strictly NOT in localStorage)
 let cachedAccessToken: string | null = null;
 
 export interface AuthUserInfo {
@@ -41,19 +31,22 @@ export interface AuthUserInfo {
   photoURL: string | null;
 }
 
-/**
- * Initialize auth listener on application boot.
- */
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
+      const email = user.email?.trim().toLowerCase() || "";
+      if (email !== OWNER_EMAIL) {
+        cachedAccessToken = null;
+        await signOut(auth).catch(() => {});
+        if (onAuthFailure) onAuthFailure();
+        return;
+      }
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
-        // Access token is only available on explicit sign-in or prompt in client-side OAuth
         if (onAuthFailure) onAuthFailure();
       }
     } else {
@@ -63,9 +56,6 @@ export const initAuth = (
   });
 };
 
-/**
- * Trigger Google Sign In popup requesting Workspace scopes
- */
 export const googleSignIn = async (): Promise<{
   user: User;
   accessToken: string;
@@ -73,8 +63,13 @@ export const googleSignIn = async (): Promise<{
   try {
     isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const email = result.user.email?.trim().toLowerCase() || "";
+    if (email !== OWNER_EMAIL) {
+      await signOut(auth).catch(() => {});
+      throw new Error("هذا الحساب غير مصرح له بالدخول. استخدم حساب المالك فقط.");
+    }
 
+    const credential = GoogleAuthProvider.credentialFromResult(result);
     cachedAccessToken = credential?.accessToken || null;
     return { user: result.user, accessToken: cachedAccessToken || "" };
   } catch (error: any) {
@@ -103,23 +98,8 @@ export const googleSignIn = async (): Promise<{
   }
 };
 
-/**
- * Retrieve the active in-memory access token
- */
-export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
-};
-
-/**
- * Set token in memory (e.g. after interactive login)
- */
-export const setCachedAccessToken = (token: string | null) => {
-  cachedAccessToken = token;
-};
-
-/**
- * Sign out and clear in-memory token
- */
+export const getAccessToken = async (): Promise<string | null> => cachedAccessToken;
+export const setCachedAccessToken = (token: string | null) => { cachedAccessToken = token; };
 export const logout = async () => {
   await signOut(auth);
   cachedAccessToken = null;
