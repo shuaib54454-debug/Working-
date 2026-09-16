@@ -1,12 +1,14 @@
 name: Passport Approval Hardening
 
 on:
-  push:
+  pull_request:
     branches:
       - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   harden:
@@ -24,51 +26,17 @@ jobs:
 
           path = Path("src/components/PassportScannerModal.tsx")
           text = path.read_text(encoding="utf-8")
-
-          # 1) Never import or call the MRZ generator from the production scanner UI.
           text = text.replace("  generateTD3MRZFromVisual,\n", "")
+          text, n = re.subn(r'\n    // If MRZ lines are missing but visual fields exist, auto-synthesize valid MRZ\n    if \(!parsedMRZ && \(candidateFirstName \|\| visualPassportNo\)\) \{.*?\n    \}\n\n    // Auto-fill candidate fields', '\n    // Auto-fill candidate fields', text, flags=re.S)
+          if n != 1: raise SystemExit(f"Expected visual MRZ synthesis block, found {n}")
+          text, n = re.subn(r'\n          // If MRZ lines are missing or partial, auto-synthesize from visual fields\n          if \(!line1 \|\| !line2 \|\| line1\.length < 40 \|\| line2\.length < 40\) \{.*?\n          \}\n\n          setMrzLine1\(line1\);', '\n          setMrzLine1(line1);', text, flags=re.S)
+          if n != 1: raise SystemExit(f"Expected AI MRZ synthesis block, found {n}")
+          text, n = re.subn(r'\n  // Auto-generate standard ICAO Doc 9303 MRZ lines from visual fields\n  const handleAutoGenerateMRZ = \(\) => \{.*?\n  \};\n', '\n', text, flags=re.S)
+          if n != 1: raise SystemExit(f"Expected auto-generate handler, found {n}")
 
-          # 2) Manual/visual fields may be displayed, but they must never become a fake MRZ.
-          text, n = re.subn(
-              r'\n    // If MRZ lines are missing but visual fields exist, auto-synthesize valid MRZ\n'
-              r'    if \(!parsedMRZ && \(candidateFirstName \|\| visualPassportNo\)\) \{.*?\n'
-              r'    \}\n\n    // Auto-fill candidate fields',
-              '\n    // Auto-fill candidate fields',
-              text,
-              flags=re.S,
-          )
-          if n != 1:
-              raise SystemExit(f"Expected 1 visual->MRZ synthesis block, found {n}")
-
-          # 3) AI may populate real visual fields, but approval requires real MRZ output from the backend.
-          text, n = re.subn(
-              r'\n          // If MRZ lines are missing or partial, auto-synthesize from visual fields\n'
-              r'          if \(!line1 \|\| !line2 \|\| line1\.length < 40 \|\| line2\.length < 40\) \{.*?\n'
-              r'          \}\n\n          setMrzLine1\(line1\);',
-              '\n          setMrzLine1(line1);',
-              text,
-              flags=re.S,
-          )
-          if n != 1:
-              raise SystemExit(f"Expected 1 AI MRZ synthesis block, found {n}")
-
-          # 4) Remove the explicit UI action that generated an MRZ from editable fields.
-          text, n = re.subn(
-              r'\n  // Auto-generate standard ICAO Doc 9303 MRZ lines from visual fields\n'
-              r'  const handleAutoGenerateMRZ = \(\) => \{.*?\n  \};\n',
-              '\n',
-              text,
-              flags=re.S,
-          )
-          if n != 1:
-              raise SystemExit(f"Expected 1 auto-generate handler, found {n}")
-
-          # 5) Replace approval with strict evidence-based checks from the parsed analysis.
           start = text.find('  // Apply parsed and verified data to Candidate Form\n  const handleApply = () => {')
           end = text.find('\n  // Copy structured audit report', start)
-          if start == -1 or end == -1:
-              raise SystemExit("handleApply anchors not found")
-
+          if start == -1 or end == -1: raise SystemExit("handleApply anchors not found")
           replacement = '''  // Apply only real, verified passport data to the candidate form.
   const handleApply = () => {
     const mrz = analysis?.mrz;
@@ -78,12 +46,10 @@ jobs:
       analysis?.overallStatus === "VERIFIED" &&
       !analysis.validityAnalysis.isExpired
     );
-
     if (!isVerified) {
       setErrorMessage("لا يمكن اعتماد بيانات الجواز قبل استخراج MRZ حقيقي والتحقق من جميع أرقام التحقق والمطابقة.");
       return;
     }
-
     const fName = (mrz?.givenNames || candidateFirstName).trim();
     const lName = (mrz?.surname || candidateLastName || fName).trim();
     const passNo = cleanPassportNumber(mrz?.passportNumber || visualPassportNo);
@@ -91,7 +57,6 @@ jobs:
     const bDate = normalizeDateToISO(mrz?.birthDateFormatted || visualBirthDate);
     const gndr = mrz?.gender === "female" ? "female" : "male";
     const cntry = mrz?.nationalityName || mrz?.issuingCountryName || visualNationality;
-
     const approval = canApprovePassportData({
       hasVerifiedMrz: true,
       passportNumber: passNo,
@@ -100,12 +65,10 @@ jobs:
       birthDate: bDate,
       expiryDate: passExp
     });
-
     if (!approval.allowed || !approval.normalizedData) {
       setErrorMessage(approval.reason || "لا يمكن اعتماد بيانات الجواز قبل اكتمال التحقق.");
       return;
     }
-
     onApplyData({
       firstName: approval.normalizedData.firstName,
       lastName: approval.normalizedData.lastName,
@@ -116,57 +79,29 @@ jobs:
       country: cntry,
       job: visualJob || "عاملة منزلية"
     });
-
     onClose();
   };
 '''
           text = text[:start] + replacement + text[end:]
-
-          # 6) Remove the UI button that offered synthetic MRZ generation.
-          text, n = re.subn(
-              r'\n              <button\n'
-              r'                type="button"\n'
-              r'                onClick=\{handleAutoGenerateMRZ\}.*?\n'
-              r'              </button>',
-              '',
-              text,
-              flags=re.S,
-          )
-          if n != 1:
-              raise SystemExit(f"Expected 1 synthetic MRZ UI button, found {n}")
-
+          text, n = re.subn(r'\n              <button\n                type="button"\n                onClick=\{handleAutoGenerateMRZ\}.*?\n              </button>', '', text, flags=re.S)
+          if n != 1: raise SystemExit(f"Expected synthetic MRZ UI button, found {n}")
           path.write_text(text, encoding="utf-8")
 
           guard = Path("src/lib/passportApprovalGuard.ts")
-          guard_text = guard.read_text(encoding="utf-8")
-          guard_text = guard_text.replace('  if (isExpired && !input.allowExpired) {', '  if (isExpired) {')
+          guard_text = guard.read_text(encoding="utf-8").replace('  if (isExpired && !input.allowExpired) {', '  if (isExpired) {')
           guard.write_text(guard_text, encoding="utf-8")
           PY
 
-          if grep -RniE 'generateTD3MRZFromVisual|Math\.random\(\).*passport|P0000000|"مرشحة جديدة"|"EP" \+ Math\.floor|allowExpired: true' src/components --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
-            echo "❌ Synthetic passport approval fallback remains in production components."
-            exit 1
-          fi
-
-          if grep -RniE 'if \(isExpired && !input\.allowExpired\)|allowExpired: true' src/lib src/components --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
-            echo "❌ Expired passport approval override remains in production code."
-            exit 1
-          fi
-
-          if grep -Rni 'handleAutoGenerateMRZ' src/components/PassportScannerModal.tsx; then
-            echo "❌ Synthetic MRZ UI handler remains referenced."
-            exit 1
-          fi
+          ! grep -RniE 'generateTD3MRZFromVisual|Math\.random\(\).*passport|P0000000|"مرشحة جديدة"|"EP" \+ Math\.floor|allowExpired: true|handleAutoGenerateMRZ' src/components --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'
+          ! grep -RniE 'if \(isExpired && !input\.allowExpired\)|allowExpired: true' src/lib src/components --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/components/PassportScannerModal.tsx src/lib/passportApprovalGuard.ts
           if ! git diff --cached --quiet; then
             git commit -m 'security: require real verified passport MRZ data'
-            git push origin HEAD:main
+            git push origin HEAD:${{ github.head_ref }}
           fi
-
-          # This was a one-time migration workflow. Remove it after the source patch is committed.
           git rm -f .github/workflows/passport-fix.yml
           git commit -m 'chore: remove one-time passport hardening workflow'
-          git push origin HEAD:main
+          git push origin HEAD:${{ github.head_ref }}
