@@ -1,6 +1,7 @@
 import React, { StrictMode, Component, ErrorInfo, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { AppLockGate } from './components/AppLockGate';
 import { LanguageProvider } from './lib/LanguageContext';
 import './index.css';
 
@@ -68,7 +69,9 @@ if (container) {
     <StrictMode>
       <ErrorBoundary>
         <LanguageProvider>
-          <App />
+          <AppLockGate>
+            <App />
+          </AppLockGate>
         </LanguageProvider>
       </ErrorBoundary>
     </StrictMode>
