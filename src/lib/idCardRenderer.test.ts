@@ -51,7 +51,7 @@ describe("Candidate ID Card Renderer (CR80 Standard)", () => {
     assert.ok(frontHtml.includes("د. أحمد خليل المنصوري"));
     assert.ok(frontHtml.includes("طبيب استشاري باطنية"));
     assert.ok(frontHtml.includes("DOC-2026-0042"));
-    assert.ok(frontHtml.includes("بطاقة تعريف طبيب"));
+    assert.ok(frontHtml.includes("بطاقة تعريف مهنية"));
     assert.ok(frontHtml.includes("cr80-card-front"));
   });
 
