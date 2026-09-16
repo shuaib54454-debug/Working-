@@ -59,4 +59,17 @@ describe("canApprovePassportData", () => {
       today: "2026-08-29"
     }).allowed, false);
   });
+
+  it("rejects an expired passport even when an override is requested", () => {
+    assert.equal(canApprovePassportData({
+      hasVerifiedMrz: true,
+      passportNumber: "A12345678",
+      firstName: "JOHN",
+      lastName: "DOE",
+      birthDate: "1990-01-01",
+      expiryDate: "2020-01-01",
+      today: "2026-08-29",
+      allowExpired: true
+    }).allowed, false);
+  });
 });
