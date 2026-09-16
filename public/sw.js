@@ -1,5 +1,5 @@
 // Shuayb Trade Bridge - Service Worker for PWA
-const CACHE_NAME = 'shuayb-pwa-v1';
+const CACHE_NAME = 'shuayb-pwa-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -14,26 +14,25 @@ const ASSETS_TO_CACHE = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE).catch((err) => {
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(ASSETS_TO_CACHE).catch((err) => {
         console.warn('PWA Pre-cache non-fatal error:', err);
-      });
-    })
+      })
+    )
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
+    caches.keys().then((keys) =>
+      Promise.all(
         keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
+          if (key !== CACHE_NAME) return caches.delete(key);
+          return undefined;
         })
-      );
-    })
+      )
+    )
   );
   self.clients.claim();
 });
@@ -41,32 +40,30 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
-  // For API calls, dev modules, and vite assets, go directly to network
-  const url = event.request.url;
+  const requestUrl = new URL(event.request.url);
+  const isSameOrigin = requestUrl.origin === self.location.origin;
+  if (!isSameOrigin) return;
+
+  // Never cache application/API responses, dynamic routes, uploads, or query-string
+  // requests. Candidate/passport data must not enter the service-worker cache.
   if (
-    url.includes('/api/') ||
-    url.includes('/@vite') ||
-    url.includes('/@') ||
-    url.includes('/src/') ||
-    url.includes('/node_modules/') ||
-    url.includes('?v=') ||
-    url.includes('hot-update')
+    requestUrl.pathname.startsWith('/api/') ||
+    requestUrl.pathname.startsWith('/src/') ||
+    requestUrl.pathname.startsWith('/node_modules/') ||
+    requestUrl.pathname.startsWith('/workers/') ||
+    requestUrl.search ||
+    event.request.headers.get('Authorization')
   ) {
     return;
   }
 
+  // Cache only the explicit public shell/assets above. All other requests use network.
+  if (!ASSETS_TO_CACHE.includes(requestUrl.pathname)) return;
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Fetch and update cache in background
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, networkResponse);
-            });
-          }
-        }).catch(() => {});
-        return cachedResponse;
+        return fetch(event.request).catch(() => cachedResponse);
       }
 
       return fetch(event.request).then((networkResponse) => {
@@ -79,10 +76,8 @@ self.addEventListener('fetch', (event) => {
         });
         return networkResponse;
       }).catch(() => {
-        // Fallback for navigation requests
-        if (event.request.mode === 'navigate') {
-          return caches.match('/index.html');
-        }
+        if (event.request.mode === 'navigate') return caches.match('/index.html');
+        return undefined;
       });
     })
   );
