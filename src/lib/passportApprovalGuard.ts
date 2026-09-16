@@ -97,6 +97,10 @@ export const parseStrictDate = (value: string): Date | null => {
 };
 
 export function canApprovePassportData(input: PassportApprovalInput): PassportApprovalResult {
+  if (!input.hasVerifiedMrz) {
+    return { allowed: false, reason: "لا يمكن اعتماد بيانات الجواز بدون MRZ موثّق." };
+  }
+
   const fName = (input.firstName || "").trim();
   let lName = (input.lastName || "").trim();
   if (!lName) lName = fName;
@@ -133,8 +137,11 @@ export function canApprovePassportData(input: PassportApprovalInput): PassportAp
 
   const isExpired = expiry < today;
   if (isExpired && !input.allowExpired) {
-    // In recruitment, allow approval with explicit warning so worker records can still be registered/renewed
-    console.warn("Passport is expired or nearing renewal:", expiryIso);
+    return {
+      allowed: false,
+      isExpired: true,
+      reason: "لا يمكن اعتماد جواز سفر منتهي الصلاحية. يجب تجديد الجواز أولاً."
+    };
   }
 
   return {
