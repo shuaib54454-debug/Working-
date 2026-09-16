@@ -47,7 +47,6 @@ export function normalizeDateToISO(value?: string): string {
   let clean = normalizeDigits(value).trim();
   if (!clean) return "";
 
-  // Standard ISO: YYYY-MM-DD
   const isoMatch = clean.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
   if (isoMatch) {
     const y = isoMatch[1];
@@ -56,7 +55,6 @@ export function normalizeDateToISO(value?: string): string {
     return `${y}-${m}-${d}`;
   }
 
-  // European / Middle Eastern format: DD/MM/YYYY or DD-MM-YYYY
   const ddmmyyyyMatch = clean.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
   if (ddmmyyyyMatch) {
     const d = ddmmyyyyMatch[1].padStart(2, "0");
@@ -116,7 +114,6 @@ export function canApprovePassportData(input: PassportApprovalInput): PassportAp
 
   const birthIso = normalizeDateToISO(input.birthDate);
   const expiryIso = normalizeDateToISO(input.expiryDate);
-
   const birth = parseStrictDate(birthIso);
   const expiry = parseStrictDate(expiryIso);
 
@@ -136,7 +133,7 @@ export function canApprovePassportData(input: PassportApprovalInput): PassportAp
   }
 
   const isExpired = expiry < today;
-  if (isExpired && !input.allowExpired) {
+  if (isExpired) {
     return {
       allowed: false,
       isExpired: true,
