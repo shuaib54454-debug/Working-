@@ -461,29 +461,29 @@ export const GoogleSheetsModal: React.FC<GoogleSheetsModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-      <div className="bg-[#fdfcfb] w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden border border-stone-200 flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in overflow-y-auto">
+      <div className="bg-[#fdfcfb] w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden border border-stone-200 flex flex-col max-h-[96vh] sm:max-h-[92vh]">
         {/* Modal Header */}
-        <div className="bg-[#172a46] text-white p-4 sm:p-5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#c9a84c]/20 border border-[#c9a84c]/30 flex items-center justify-center text-[#c9a84c]">
+        <div className="bg-[#172a46] text-white p-3.5 sm:p-5 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-[#c9a84c]/20 border border-[#c9a84c]/30 flex items-center justify-center text-[#c9a84c] shrink-0">
               <FileSpreadsheet className="w-5 h-5" />
             </div>
-            <div>
-              <h3 className="font-black text-base sm:text-lg flex items-center gap-2">
-                <span>تكامل Google Sheets والتصدير المباشر</span>
-                <span className="text-[10px] font-black bg-[#c9a84c] text-[#172a46] px-2 py-0.5 rounded-full">
+            <div className="min-w-0">
+              <h3 className="font-black text-sm sm:text-lg flex items-center gap-2 truncate">
+                <span className="truncate">تكامل Google Sheets والتصدير المباشر</span>
+                <span className="hidden sm:inline-block text-[10px] font-black bg-[#c9a84c] text-[#172a46] px-2 py-0.5 rounded-full shrink-0">
                   سحابي ومحلي
                 </span>
               </h3>
-              <p className="text-xs text-stone-300">
+              <p className="text-[11px] sm:text-xs text-stone-300 hidden sm:block">
                 مزامنة وتصدير واستيراد بيانات المرشحين والمقبوضات والمصروفات مع جداول بيانات Google Drive وملفات Excel
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-2xl hover:bg-white/10 text-stone-300 hover:text-white transition-colors"
+            className="p-2 rounded-2xl hover:bg-white/10 text-stone-300 hover:text-white transition-colors shrink-0"
           >
             <X className="w-5 h-5" />
           </button>

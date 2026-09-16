@@ -52,6 +52,8 @@ import {
   syncCandidateToCloud,
   deleteCandidateFromCloud,
   syncAllCandidatesBatch,
+  bulkArchiveCandidatesInCloud,
+  bulkRestoreCandidatesInCloud,
   subscribeToExpenses,
   syncExpenseToCloud,
   deleteExpenseFromCloud,
@@ -575,49 +577,63 @@ export default function App() {
 
   const handleArchiveCandidate = (id: string) => {
     const uid = currentUser?.uid || "";
+    let archivedCandidate: Candidate | null = null;
+    let candName = "";
+
     setCandidates(prev => {
       const updatedList = prev.map(c => {
         if (c.id === id) {
-          const candName = `${c.firstName} ${c.lastName}`.trim();
-          const archived = { ...c, archived: true, ownerUid: uid };
-          if (uid) syncCandidateToCloud(archived, uid);
-          logActivity(
-            "CANDIDATE_ARCHIVED",
-            "CANDIDATE",
-            `أرشفة ملف المرشح: ${candName}`,
-            `تم نقل ملف المرشح ${candName} إلى الأرشيف النهائي`,
-            { candidateId: c.id, candidateName: candName }
-          );
-          return archived;
+          candName = `${c.firstName} ${c.lastName}`.trim();
+          archivedCandidate = { ...c, archived: true, ownerUid: uid || c.ownerUid, updatedAt: new Date().toISOString() };
+          return archivedCandidate;
         }
         return c;
       });
       return updatedList;
     });
+
+    if (uid && archivedCandidate) {
+      syncCandidateToCloud(archivedCandidate, uid);
+    }
+
+    logActivity(
+      "CANDIDATE_ARCHIVED",
+      "CANDIDATE",
+      `أرشفة ملف المرشح: ${candName || id}`,
+      `تم نقل ملف المرشح ${candName || id} إلى الأرشيف ومزامنة الحالة فورياً مع Cloud Firestore`,
+      { candidateId: id, candidateName: candName }
+    );
     setCurrentView("list");
   };
 
   const handleRestoreCandidate = (id: string) => {
     const uid = currentUser?.uid || "";
+    let restoredCandidate: Candidate | null = null;
+    let candName = "";
+
     setCandidates(prev => {
       const updatedList = prev.map(c => {
         if (c.id === id) {
-          const candName = `${c.firstName} ${c.lastName}`.trim();
-          const restored = { ...c, archived: false, ownerUid: uid };
-          if (uid) syncCandidateToCloud(restored, uid);
-          logActivity(
-            "CANDIDATE_RESTORED",
-            "CANDIDATE",
-            `استعادة ملف المرشح: ${candName}`,
-            `تمت استعادة المرشح ${candName} من الأرشيف إلى قائمة التشغيل الفعالة`,
-            { candidateId: c.id, candidateName: candName }
-          );
-          return restored;
+          candName = `${c.firstName} ${c.lastName}`.trim();
+          restoredCandidate = { ...c, archived: false, ownerUid: uid || c.ownerUid, updatedAt: new Date().toISOString() };
+          return restoredCandidate;
         }
         return c;
       });
       return updatedList;
     });
+
+    if (uid && restoredCandidate) {
+      syncCandidateToCloud(restoredCandidate, uid);
+    }
+
+    logActivity(
+      "CANDIDATE_RESTORED",
+      "CANDIDATE",
+      `استعادة ملف المرشح: ${candName || id}`,
+      `تمت استعادة المرشح ${candName || id} من الأرشيف إلى قائمة التشغيل الفعالة ومزامنة الحالة مع Cloud Firestore`,
+      { candidateId: id, candidateName: candName }
+    );
   };
 
   const handlePermanentDeleteCandidate = (id: string) => {
@@ -647,36 +663,90 @@ export default function App() {
     );
   };
 
-  const handleBulkArchiveCandidates = (ids: string[]) => {
+  const handleBulkArchiveCandidates = async (ids: string[]) => {
+    if (!ids || ids.length === 0) return;
     const uid = currentUser?.uid || "";
     const idSet = new Set(ids);
-    setCandidates(prev => {
-      const updatedList = prev.map(c => {
-        if (idSet.has(c.id)) {
-          const archived = { ...c, archived: true, ownerUid: uid };
-          if (uid) syncCandidateToCloud(archived, uid);
-          return archived;
-        }
-        return c;
-      });
-      return updatedList;
-    });
-  };
 
-  const handleBulkChangeStageCandidates = (ids: string[], newStage: StageId) => {
-    const uid = currentUser?.uid || "";
-    const idSet = new Set(ids);
+    const archivedCandidates: Candidate[] = [];
+    const archivedNames: string[] = [];
+
+    // 1. Optimistic state update for instant UI feedback
     setCandidates(prev => {
       const updatedList = prev.map(c => {
         if (idSet.has(c.id)) {
-          const updated = { ...c, stage: newStage, ownerUid: uid };
-          if (uid) syncCandidateToCloud(updated, uid);
+          const candName = `${c.firstName} ${c.lastName}`.trim();
+          archivedNames.push(candName || c.id);
+          const updated: Candidate = {
+            ...c,
+            archived: true,
+            ownerUid: uid || c.ownerUid,
+            updatedAt: new Date().toISOString()
+          };
+          archivedCandidates.push(updated);
           return updated;
         }
         return c;
       });
       return updatedList;
     });
+
+    // 2. Clear active candidate if currently selected/viewed
+    if (activeCandidateId && idSet.has(activeCandidateId)) {
+      setActiveCandidateId(null);
+    }
+
+    // 3. Real-time batch synchronization with Cloud Firestore to ensure multi-device consistency
+    if (uid) {
+      try {
+        await bulkArchiveCandidatesInCloud(ids, uid, archivedCandidates);
+      } catch (err) {
+        console.error("Failed to sync bulk archive with Cloud Firestore:", err);
+      }
+    }
+
+    // 4. Log audit activity entry (which also syncs to Cloud Firestore activities)
+    const previewNames = archivedNames.slice(0, 3).join(", ");
+    const remainingCount = archivedNames.length - 3;
+    const summaryNames = remainingCount > 0 ? `${previewNames} وآخرين (+${remainingCount})` : previewNames || `${ids.length} مرشح`;
+
+    logActivity(
+      "CANDIDATE_ARCHIVED",
+      "CANDIDATE",
+      `أرشفة مجمعة لـ (${ids.length}) من المرشحين`,
+      `تمت أرشفة ملفات المرشحين [${summaryNames}] بنجاح ومزامنة الحالة فورياً مع Cloud Firestore لضمان اتساق البيانات عبر جميع الأجهزة`,
+      {
+        candidateId: ids[0],
+        candidateName: summaryNames,
+        metadata: { candidateIds: ids, count: ids.length, candidateNames: archivedNames }
+      }
+    );
+  };
+
+  const handleBulkChangeStageCandidates = (ids: string[], newStage: StageId) => {
+    const uid = currentUser?.uid || "";
+    const idSet = new Set(ids);
+    const updatedCandidates: Candidate[] = [];
+    setCandidates(prev => {
+      const updatedList = prev.map(c => {
+        if (idSet.has(c.id)) {
+          const updated: Candidate = {
+            ...c,
+            stage: newStage,
+            ownerUid: uid || c.ownerUid,
+            updatedAt: new Date().toISOString()
+          };
+          updatedCandidates.push(updated);
+          return updated;
+        }
+        return c;
+      });
+      return updatedList;
+    });
+
+    if (uid && updatedCandidates.length > 0) {
+      syncAllCandidatesBatch(updatedCandidates, uid);
+    }
   };
 
   const handleBulkDeleteCandidates = (ids: string[]) => {
@@ -845,7 +915,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#fdfcfb] text-[#1a1c1e] flex flex-col font-sans selection:bg-[#c9a84c]/20 selection:text-[#172a46]">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#fdfcfb] text-[#1a1c1e] flex flex-col font-sans selection:bg-[#c9a84c]/20 selection:text-[#172a46]">
       {/* Top Header Navigation */}
       <TopBar
         currentView={currentView}
@@ -870,7 +940,7 @@ export default function App() {
       />
 
       {/* Main Content Body */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 overflow-x-hidden">
         {currentView === "dashboard" && (
           <Dashboard
             candidates={candidates}

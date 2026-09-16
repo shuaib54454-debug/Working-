@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { Candidate, GeneralExpense, AgencySettings } from "../types";
 import { formatMoney } from "../data/initialData";
+import { useLanguage } from "../lib/LanguageContext";
 
 interface MonthlyRevenueChartProps {
   candidates: Candidate[];
@@ -47,10 +48,25 @@ const ARABIC_MONTHS = [
   "ديسمبر"
 ];
 
+const ENGLISH_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec"
+];
+
 interface MonthlyDataPoint {
   key: string; // "YYYY-MM"
-  monthName: string; // "فبراير 2024"
-  shortMonth: string; // "فبراير"
+  monthName: string;
+  shortMonth: string;
   year: string;
   revenue: number; // Actual payments received
   contractValue: number; // Candidate totalFees registered in this month
@@ -67,9 +83,12 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
   generalExpenses = [],
   currency
 }) => {
+  const { isAr } = useLanguage();
   const [chartType, setChartType] = useState<"area" | "bar" | "line">("area");
   const [metricView, setMetricView] = useState<"revenue" | "comparison" | "net">("revenue");
   const [selectedYear, setSelectedYear] = useState<string>("all");
+
+  const monthsList = isAr ? ARABIC_MONTHS : ENGLISH_MONTHS;
 
   // Aggregate monthly data
   const { monthlyData, availableYears, summary } = useMemo(() => {
@@ -88,8 +107,8 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
       if (!dataMap[key]) {
         dataMap[key] = {
           key,
-          monthName: `${ARABIC_MONTHS[monthIdx]} ${year}`,
-          shortMonth: ARABIC_MONTHS[monthIdx],
+          monthName: `${monthsList[monthIdx]} ${year}`,
+          shortMonth: monthsList[monthIdx],
           year,
           revenue: 0,
           contractValue: 0,
@@ -173,8 +192,8 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
         const key = `${y}-${m}`;
         sorted.push({
           key,
-          monthName: `${ARABIC_MONTHS[d.getMonth()]} ${y}`,
-          shortMonth: ARABIC_MONTHS[d.getMonth()],
+          monthName: `${monthsList[d.getMonth()]} ${y}`,
+          shortMonth: monthsList[d.getMonth()],
           year: y,
           revenue: 0,
           contractValue: 0,
@@ -211,24 +230,26 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
         totalPaymentsCount
       }
     };
-  }, [candidates, generalExpenses, selectedYear]);
+  }, [candidates, generalExpenses, selectedYear, monthsList]);
 
   // Custom Chart Tooltip
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       const dataPoint: MonthlyDataPoint = payload[0]?.payload;
       return (
-        <div className="bg-[#172a46] text-white p-4 rounded-2xl shadow-xl border border-white/10 text-xs min-w-[200px] z-50 text-right">
+        <div className="bg-[#172a46] text-white p-4 rounded-2xl shadow-xl border border-white/10 text-xs min-w-[200px] z-50">
           <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-2">
             <span className="font-black text-[#c9a84c] text-sm">{dataPoint?.monthName || label}</span>
-            <span className="text-[10px] text-stone-400">{dataPoint?.paymentsCount || 0} دفعة</span>
+            <span className="text-[10px] text-stone-400">
+              {dataPoint?.paymentsCount || 0} {isAr ? "دفعة" : "payments"}
+            </span>
           </div>
 
           <div className="space-y-1.5 font-medium">
             <div className="flex items-center justify-between">
               <span className="text-stone-300 flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#c9a84c]" />
-                الإيرادات المحصلة:
+                {isAr ? "الإيرادات المحصلة:" : "Collected Revenue:"}
               </span>
               <strong className="text-white font-black">{formatMoney(dataPoint?.revenue || 0, currency)}</strong>
             </div>
@@ -238,7 +259,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-stone-300 flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-blue-400" />
-                    قيمة العقود المسجلة:
+                    {isAr ? "قيمة العقود المسجلة:" : "Contract Value:"}
                   </span>
                   <strong className="text-blue-300 font-black">{formatMoney(dataPoint?.contractValue || 0, currency)}</strong>
                 </div>
@@ -246,7 +267,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-stone-300 flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-rose-400" />
-                    المصروفات الإجمالية:
+                    {isAr ? "المصروفات الإجمالية:" : "Total Expenses:"}
                   </span>
                   <strong className="text-rose-300 font-black">{formatMoney(dataPoint?.totalExpenses || 0, currency)}</strong>
                 </div>
@@ -255,7 +276,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
 
             {(metricView === "comparison" || metricView === "net") && (
               <div className="flex items-center justify-between pt-1.5 border-t border-white/10 mt-1">
-                <span className="text-emerald-300 font-bold">صافي الدخل الشهري:</span>
+                <span className="text-emerald-300 font-bold">{isAr ? "صافي الدخل الشهري:" : "Monthly Net:"}</span>
                 <strong className={`font-black ${dataPoint?.netIncome >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                   {formatMoney(dataPoint?.netIncome || 0, currency)}
                 </strong>
@@ -277,13 +298,17 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
             <div className="w-8 h-8 rounded-2xl bg-[#c9a84c]/10 text-[#c9a84c] flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
-            <h3 className="font-black text-lg text-[#172a46]">توزيع إيرادات التوظيف الشهرية</h3>
+            <h3 className="font-black text-lg text-[#172a46]">
+              {isAr ? "توزيع إيرادات التوظيف الشهرية" : "Monthly Recruitment Revenue Distribution"}
+            </h3>
             <span className="text-[10px] font-black bg-stone-100 text-stone-600 px-2.5 py-0.5 rounded-full border border-stone-200">
-              تحليل مالي
+              {isAr ? "تحليل مالي" : "Financial Analytics"}
             </span>
           </div>
           <p className="text-xs text-stone-500">
-            تتبع التدفقات المالية والمقبوضات الشهرية وعقود التوظيف
+            {isAr
+              ? "تتبع التدفقات المالية والمقبوضات الشهرية وعقود التوظيف"
+              : "Track monthly financial flows, collections, and recruitment contracts"}
           </p>
         </div>
 
@@ -296,10 +321,10 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
               onChange={e => setSelectedYear(e.target.value)}
               className="px-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold text-stone-700 outline-none focus:ring-2 focus:ring-[#c9a84c]"
             >
-              <option value="all">كل السنوات</option>
+              <option value="all">{isAr ? "كل السنوات" : "All Years"}</option>
               {availableYears.map(yr => (
                 <option key={yr} value={yr}>
-                  سنة {yr}
+                  {isAr ? `سنة ${yr}` : `Year ${yr}`}
                 </option>
               ))}
             </select>
@@ -315,7 +340,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                   : "text-stone-600 hover:text-[#172a46]"
               }`}
             >
-              الإيرادات المحصلة
+              {isAr ? "الإيرادات المحصلة" : "Collected Revenue"}
             </button>
             <button
               onClick={() => setMetricView("comparison")}
@@ -325,7 +350,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                   : "text-stone-600 hover:text-[#172a46]"
               }`}
             >
-              مقارنة شاملة
+              {isAr ? "مقارنة شاملة" : "Full Comparison"}
             </button>
             <button
               onClick={() => setMetricView("net")}
@@ -335,7 +360,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                   : "text-stone-600 hover:text-[#172a46]"
               }`}
             >
-              الصافي
+              {isAr ? "الصافي" : "Net Profit"}
             </button>
           </div>
 
@@ -343,7 +368,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
           <div className="flex items-center bg-stone-100 p-1 rounded-xl text-stone-600">
             <button
               onClick={() => setChartType("area")}
-              title="مخطط مساحي"
+              title={isAr ? "مخطط مساحي" : "Area Chart"}
               className={`p-1.5 rounded-lg transition-all ${
                 chartType === "area" ? "bg-white text-[#172a46] shadow-xs" : "hover:text-[#172a46]"
               }`}
@@ -352,7 +377,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
             </button>
             <button
               onClick={() => setChartType("bar")}
-              title="أعمدة بيانية"
+              title={isAr ? "أعمدة بيانية" : "Bar Chart"}
               className={`p-1.5 rounded-lg transition-all ${
                 chartType === "bar" ? "bg-white text-[#172a46] shadow-xs" : "hover:text-[#172a46]"
               }`}
@@ -361,7 +386,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
             </button>
             <button
               onClick={() => setChartType("line")}
-              title="خط بياني"
+              title={isAr ? "خط بياني" : "Line Chart"}
               className={`p-1.5 rounded-lg transition-all ${
                 chartType === "line" ? "bg-white text-[#172a46] shadow-xs" : "hover:text-[#172a46]"
               }`}
@@ -375,23 +400,33 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
       {/* Mini KPI Highlights Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-200">
-          <span className="text-[10px] text-stone-500 font-bold block mb-0.5">إجمالي التحصيلات بالفترة</span>
+          <span className="text-[10px] text-stone-500 font-bold block mb-0.5">
+            {isAr ? "إجمالي التحصيلات بالفترة" : "Total Collections"}
+          </span>
           <span className="text-base sm:text-lg font-black text-[#172a46]">
             {formatMoney(summary.totalRev, currency)}
           </span>
-          <span className="text-[9px] text-stone-400 block mt-0.5">{summary.totalPaymentsCount} عملية دفع مسجلة</span>
+          <span className="text-[9px] text-stone-400 block mt-0.5">
+            {summary.totalPaymentsCount} {isAr ? "عملية دفع مسجلة" : "recorded payments"}
+          </span>
         </div>
 
         <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-200">
-          <span className="text-[10px] text-stone-500 font-bold block mb-0.5">متوسط الإيراد الشهري</span>
+          <span className="text-[10px] text-stone-500 font-bold block mb-0.5">
+            {isAr ? "متوسط الإيراد الشهري" : "Avg Monthly Revenue"}
+          </span>
           <span className="text-base sm:text-lg font-black text-blue-700">
             {formatMoney(summary.avgMonthlyRev, currency)}
           </span>
-          <span className="text-[9px] text-stone-400 block mt-0.5">معدل تحصيل شهري</span>
+          <span className="text-[9px] text-stone-400 block mt-0.5">
+            {isAr ? "معدل تحصيل شهري" : "Monthly collection rate"}
+          </span>
         </div>
 
         <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-200">
-          <span className="text-[10px] text-stone-500 font-bold block mb-0.5">أعلى شهر إيراداً</span>
+          <span className="text-[10px] text-stone-500 font-bold block mb-0.5">
+            {isAr ? "أعلى شهر إيراداً" : "Peak Month"}
+          </span>
           <span className="text-base sm:text-lg font-black text-[#c9a84c] truncate block">
             {summary.peakMonth.monthName}
           </span>
@@ -399,11 +434,15 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
         </div>
 
         <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-200">
-          <span className="text-[10px] text-stone-500 font-bold block mb-0.5">صافي الدخل الإجمالي</span>
+          <span className="text-[10px] text-stone-500 font-bold block mb-0.5">
+            {isAr ? "صافي الدخل الإجمالي" : "Total Net Income"}
+          </span>
           <span className={`text-base sm:text-lg font-black ${summary.totalNet >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
             {formatMoney(summary.totalNet, currency)}
           </span>
-          <span className="text-[9px] text-stone-400 block mt-0.5">بعد خصم المصروفات</span>
+          <span className="text-[9px] text-stone-400 block mt-0.5">
+            {isAr ? "بعد خصم المصروفات" : "After expense deduction"}
+          </span>
         </div>
       </div>
 
@@ -450,7 +489,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                 <Area
                   type="monotone"
                   dataKey="revenue"
-                  name="الإيرادات المحصلة"
+                  name={isAr ? "الإيرادات المحصلة" : "Collected Revenue"}
                   stroke="#c9a84c"
                   strokeWidth={3}
                   fillOpacity={1}
@@ -464,7 +503,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                   <Area
                     type="monotone"
                     dataKey="contractValue"
-                    name="قيمة العقود"
+                    name={isAr ? "قيمة العقود" : "Contract Value"}
                     stroke="#3b82f6"
                     strokeWidth={2}
                     fillOpacity={1}
@@ -473,7 +512,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                   <Area
                     type="monotone"
                     dataKey="revenue"
-                    name="المحصل فعلياً"
+                    name={isAr ? "المحصل فعلياً" : "Actual Collected"}
                     stroke="#c9a84c"
                     strokeWidth={3}
                     fillOpacity={1}
@@ -482,7 +521,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                   <Area
                     type="monotone"
                     dataKey="totalExpenses"
-                    name="المصروفات"
+                    name={isAr ? "المصروفات" : "Expenses"}
                     stroke="#f43f5e"
                     strokeWidth={2}
                     fillOpacity={0.1}
@@ -495,7 +534,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                 <Area
                   type="monotone"
                   dataKey="netIncome"
-                  name="صافي الدخل الشهري"
+                  name={isAr ? "صافي الدخل الشهري" : "Monthly Net Income"}
                   stroke="#10b981"
                   strokeWidth={3}
                   fillOpacity={1}
@@ -528,7 +567,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
               {metricView === "revenue" && (
                 <Bar
                   dataKey="revenue"
-                  name="الإيرادات المحصلة"
+                  name={isAr ? "الإيرادات المحصلة" : "Collected Revenue"}
                   fill="#c9a84c"
                   radius={[8, 8, 0, 0]}
                   maxBarSize={45}
@@ -539,21 +578,21 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                 <>
                   <Bar
                     dataKey="contractValue"
-                    name="قيمة العقود"
+                    name={isAr ? "قيمة العقود" : "Contract Value"}
                     fill="#3b82f6"
                     radius={[6, 6, 0, 0]}
                     maxBarSize={28}
                   />
                   <Bar
                     dataKey="revenue"
-                    name="المحصل فعلياً"
+                    name={isAr ? "المحصل فعلياً" : "Actual Collected"}
                     fill="#c9a84c"
                     radius={[6, 6, 0, 0]}
                     maxBarSize={28}
                   />
                   <Bar
                     dataKey="totalExpenses"
-                    name="المصروفات"
+                    name={isAr ? "المصروفات" : "Expenses"}
                     fill="#f43f5e"
                     radius={[6, 6, 0, 0]}
                     maxBarSize={28}
@@ -564,7 +603,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
               {metricView === "net" && (
                 <Bar
                   dataKey="netIncome"
-                  name="صافي الدخل الشهري"
+                  name={isAr ? "صافي الدخل الشهري" : "Monthly Net Income"}
                   fill="#10b981"
                   radius={[8, 8, 0, 0]}
                   maxBarSize={45}
@@ -597,7 +636,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                 <Line
                   type="monotone"
                   dataKey="revenue"
-                  name="الإيرادات المحصلة"
+                  name={isAr ? "الإيرادات المحصلة" : "Collected Revenue"}
                   stroke="#c9a84c"
                   strokeWidth={3}
                   dot={{ r: 4, fill: "#c9a84c" }}
@@ -610,7 +649,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                   <Line
                     type="monotone"
                     dataKey="contractValue"
-                    name="قيمة العقود"
+                    name={isAr ? "قيمة العقود" : "Contract Value"}
                     stroke="#3b82f6"
                     strokeWidth={2}
                     dot={{ r: 3 }}
@@ -618,7 +657,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                   <Line
                     type="monotone"
                     dataKey="revenue"
-                    name="المحصل فعلياً"
+                    name={isAr ? "المحصل فعلياً" : "Actual Collected"}
                     stroke="#c9a84c"
                     strokeWidth={3}
                     dot={{ r: 4, fill: "#c9a84c" }}
@@ -626,7 +665,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                   <Line
                     type="monotone"
                     dataKey="totalExpenses"
-                    name="المصروفات"
+                    name={isAr ? "المصروفات" : "Expenses"}
                     stroke="#f43f5e"
                     strokeWidth={2}
                     dot={{ r: 3 }}
@@ -638,7 +677,7 @@ export const MonthlyRevenueChart: React.FC<MonthlyRevenueChartProps> = ({
                 <Line
                   type="monotone"
                   dataKey="netIncome"
-                  name="صافي الدخل الشهري"
+                  name={isAr ? "صافي الدخل الشهري" : "Monthly Net Income"}
                   stroke="#10b981"
                   strokeWidth={3}
                   dot={{ r: 4, fill: "#10b981" }}

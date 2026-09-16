@@ -50,7 +50,7 @@ import {
 import { getAccessToken, googleSignIn } from "../lib/googleAuth";
 import { syncCandidateAppointment } from "../lib/googleCalendar";
 import { Candidate, AgencySettings, StageId, PaymentRecord, CandidateExpense, WorkerDocumentRecord, CandidateNoteEntry, CandidateStageHistoryEntry } from "../types";
-import { STAGES, formatMoney, getTodayDateString, calculateCandidateFinance } from "../data/initialData";
+import { STAGES, formatMoney, getTodayDateString, calculateCandidateFinance, getStageLabel } from "../data/initialData";
 import { exportElementToPDF } from "../lib/pdfUtils";
 import { ReceiptData } from "./ReceiptModal";
 import { PassportScannerModal } from "./PassportScannerModal";
@@ -58,6 +58,7 @@ import { CandidateIdCardModal } from "./CandidateIdCardModal";
 import { uploadWorkerDocument, deleteWorkerDocument, WorkerStorageFolder } from "../lib/firebase";
 import { CandidateDocumentsAndNotes } from "./CandidateDocumentsAndNotes";
 import { CandidateStageChangelog } from "./CandidateStageChangelog";
+import { useLanguage } from "../lib/LanguageContext";
 
 interface CandidateProfileProps {
   candidate: Candidate;
@@ -82,6 +83,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
   onPrintReceipt,
   onOpenCalendarModal
 }) => {
+  const { isAr } = useLanguage();
   const [activeTab, setActiveTab] = useState<"INFO" | "STEPS" | "MONEY" | "DOCS" | "HISTORY">("INFO");
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [showIdCardModal, setShowIdCardModal] = useState(false);
@@ -129,16 +131,20 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
       if (res.success) {
         setCalendarSyncSuccess(
           type === "medical"
-            ? "تمت إضافة وتأكيد موعد الفحص الطبي في تقويم Google مع التذكيرات الآلية بنجاح!"
-            : "تمت إضافة وتأكيد موعد رحلة الطيران في تقويم Google مع التذكيرات الآلية بنجاح!"
+            ? (isAr
+                ? "تمت إضافة وتأكيد موعد الفحص الطبي في تقويم Google مع التذكيرات الآلية بنجاح!"
+                : "Medical checkup appointment synced to Google Calendar successfully!")
+            : (isAr
+                ? "تمت إضافة وتأكيد موعد رحلة الطيران في تقويم Google مع التذكيرات الآلية بنجاح!"
+                : "Flight departure event synced to Google Calendar successfully!")
         );
         setTimeout(() => setCalendarSyncSuccess(null), 4500);
       } else {
-        setCalendarSyncError(res.error || "تعذر إرسال الموعد إلى تقويم Google");
+        setCalendarSyncError(res.error || (isAr ? "تعذر إرسال الموعد إلى تقويم Google" : "Failed to sync event to Google Calendar"));
         setTimeout(() => setCalendarSyncError(null), 4500);
       }
     } catch (err: any) {
-      setCalendarSyncError(err.message || "حدث خطأ أثناء الاتصال بتقويم Google");
+      setCalendarSyncError(err.message || (isAr ? "حدث خطأ أثناء الاتصال بتقويم Google" : "An error occurred while connecting to Google Calendar"));
       setTimeout(() => setCalendarSyncError(null), 4500);
     } finally {
       setCalendarSyncLoading(null);
@@ -233,19 +239,19 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
       }
 
       const titleMap: Record<string, string> = {
-        passport: "صورة جواز السفر",
-        photo: "الصورة الشخصية",
-        contract: "عقد العمل والاتفاقية",
-        visa: "تأشيرة الدخول (الفيزا)",
-        medical: "التقرير الطبي",
-        coc: "شهادة الكفاءة المهنية (COC)",
-        documents: customTitle || "وثيقة إضافية"
+        passport: isAr ? "صورة جواز السفر" : "Passport Copy",
+        photo: isAr ? "الصورة الشخصية" : "Personal Photo",
+        contract: isAr ? "عقد العمل والاتفاقية" : "Labor Contract & Agreement",
+        visa: isAr ? "تأشيرة الدخول (الفيزا)" : "Entry Visa",
+        medical: isAr ? "التقرير الطبي" : "Medical Report",
+        coc: isAr ? "شهادة الكفاءة المهنية (COC)" : "Certificate of Competence (COC)",
+        documents: customTitle || (isAr ? "وثيقة إضافية" : "Additional Document")
       };
 
       const newDocRecord: WorkerDocumentRecord = {
         id: docId,
         folder,
-        title: titleMap[folder] || customTitle || "وثيقة",
+        title: titleMap[folder] || customTitle || (isAr ? "وثيقة" : "Document"),
         url: downloadUrl,
         storagePath,
         fileName,
@@ -261,11 +267,15 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
 
       updates.uploadedDocuments = updatedDocs;
       onUpdate(candidate.id, updates);
-      setUploadSuccess(`تم رفع وأرشفة الوثيقة بنجاح بالمعرّف: ${docId}`);
+      setUploadSuccess(
+        isAr
+          ? `تم رفع وأرشفة الوثيقة بنجاح بالمعرّف: ${docId}`
+          : `Document uploaded and archived successfully with ID: ${docId}`
+      );
       setTimeout(() => setUploadSuccess(null), 4000);
     } catch (err: any) {
       console.error("Upload error:", err);
-      setUploadError(err?.message || "فشل حفظ الملف في الأرشيف");
+      setUploadError(err?.message || (isAr ? "فشل حفظ الملف في الأرشيف" : "Failed to save file to archive"));
     } finally {
       setUploadingFolder(null);
       e.target.value = "";
@@ -321,11 +331,11 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
 
       await deleteWorkerDocument(pathToDelete);
       onUpdate(candidate.id, updates);
-      setUploadSuccess("تم حذف الوثيقة بنجاح من الأرشيف");
+      setUploadSuccess(isAr ? "تم حذف الوثيقة بنجاح من الأرشيف" : "Document deleted successfully from archive");
       setTimeout(() => setUploadSuccess(null), 3000);
     } catch (err: any) {
       console.error("Delete document error:", err);
-      setUploadError("تعذر حذف الوثيقة");
+      setUploadError(isAr ? "تعذر حذف الوثيقة" : "Could not delete document");
     }
   };
 
@@ -343,7 +353,9 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
     } else if (cleanDigits.startsWith("09") && cleanDigits.length === 10) {
       cleanDigits = "251" + cleanDigits.slice(1);
     }
-    const greeting = `السلام عليكم ${name || ""}، نتواصل معك من وكالة شُعيب بخصوص ملفك وإجراءاتك.`;
+    const greeting = isAr
+      ? `السلام عليكم ${name || ""}، نتواصل معك من وكالة شُعيب بخصوص ملفك وإجراءاتك.`
+      : `Hello ${name || ""}, this is Shuayb Agency reaching out regarding your recruitment application and proceedings.`;
     return `https://wa.me/${cleanDigits}?text=${encodeURIComponent(greeting)}`;
   };
 
@@ -419,7 +431,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
       date: new Date().toISOString(),
       timestamp: Date.now(),
       note: note,
-      changedBy: "مدير النظام"
+      changedBy: isAr ? "مدير النظام" : "System Admin"
     };
     const updatedHistory = [newEntry, ...(candidate.stageHistory || [])];
     onUpdate(candidate.id, { stage: newStage, stageHistory: updatedHistory });
@@ -439,15 +451,15 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
             onClick={onBack}
             className="flex items-center gap-1.5 text-xs font-bold text-stone-300 hover:text-white bg-white/10 hover:bg-white/20 px-3.5 py-2 rounded-2xl transition-all"
           >
-            <ChevronRight className="w-4 h-4" />
-            <span>العودة للقائمة</span>
+            <ChevronRight className="w-4 h-4 rtl:rotate-0 ltr:rotate-180" />
+            <span>{isAr ? "العودة للقائمة" : "Back to List"}</span>
           </button>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleExportProfilePDF}
               disabled={isExportingPDF}
-              title="تحميل ملف المرشح بصيغة PDF"
+              title={isAr ? "تحميل ملف المرشح بصيغة PDF" : "Export candidate profile as PDF"}
               className="flex items-center gap-1.5 bg-[#8B262A] hover:bg-[#a02c31] disabled:opacity-50 text-white px-3.5 py-2 rounded-2xl text-xs font-black shadow-sm transition-transform active:scale-95"
             >
               {isExportingPDF ? (
@@ -455,16 +467,16 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               ) : (
                 <Download className="w-3.5 h-3.5 text-[#c9a84c]" />
               )}
-              <span>{isExportingPDF ? "جاري إنشاء PDF..." : "تحميل ملف PDF"}</span>
+              <span>{isExportingPDF ? (isAr ? "جاري إنشاء PDF..." : "Exporting PDF...") : (isAr ? "تحميل ملف PDF" : "Export PDF")}</span>
             </button>
 
             <button
               onClick={() => window.print()}
-              title="طباعة الملف"
+              title={isAr ? "طباعة الملف" : "Print Profile"}
               className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-stone-300 hover:text-white px-3 py-2 rounded-2xl text-xs font-bold transition-colors"
             >
               <Printer className="w-3.5 h-3.5 text-[#c9a84c]" />
-              <span>طباعة</span>
+              <span>{isAr ? "طباعة" : "Print"}</span>
             </button>
 
             {candidate.phone ? (
@@ -473,22 +485,22 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                 href={getWhatsAppChatUrl(candidate.phone, `${candidate.firstName} ${candidate.lastName}`)}
                 target="_blank"
                 rel="noopener noreferrer"
-                title={`فتح محادثة واتساب مع ${candidate.firstName}`}
+                title={isAr ? `فتح محادثة واتساب مع ${candidate.firstName}` : `Open WhatsApp chat with ${candidate.firstName}`}
                 className="flex items-center gap-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white px-3.5 py-2 rounded-2xl text-xs font-black shadow-sm transition-transform active:scale-95"
               >
                 <MessageCircle className="w-3.5 h-3.5" />
-                <span>مراسلة عبر واتساب</span>
+                <span>{isAr ? "مراسلة عبر واتساب" : "WhatsApp"}</span>
               </a>
             ) : (
               <button
                 id="btn-whatsapp-header-disabled"
                 type="button"
                 onClick={onOpenEditModal}
-                title="أضف رقم هاتف للمرشح أولاً للمراسلة عبر واتساب"
+                title={isAr ? "أضف رقم هاتف للمرشح أولاً للمراسلة عبر واتساب" : "Add a phone number first to enable WhatsApp"}
                 className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-stone-300 hover:text-white px-3.5 py-2 rounded-2xl text-xs font-bold transition-colors"
               >
                 <MessageCircle className="w-3.5 h-3.5 text-stone-400" />
-                <span>مراسلة عبر واتساب</span>
+                <span>{isAr ? "مراسلة عبر واتساب" : "WhatsApp"}</span>
               </button>
             )}
 
@@ -497,7 +509,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               className="flex items-center gap-1.5 bg-[#c9a84c] hover:bg-[#d8b759] text-[#172a46] px-4 py-2 rounded-2xl text-xs font-black shadow-sm transition-transform active:scale-95"
             >
               <Edit3 className="w-3.5 h-3.5" />
-              <span>تعديل البيانات</span>
+              <span>{isAr ? "تعديل البيانات" : "Edit Profile"}</span>
             </button>
 
             {/* Generate Professional Doctor ID Card Button */}
@@ -505,21 +517,21 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               id="btn-generate-id-card"
               type="button"
               onClick={() => setShowIdCardModal(true)}
-              title="إنشاء بطاقة الهوية المهنية للطبيب (CR80 Standard)"
+              title={isAr ? "إنشاء بطاقة الهوية المهنية للطبيب (CR80 Standard)" : "Generate Professional ID Card (CR80 Standard)"}
               className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-2xl text-xs font-black shadow-sm transition-transform active:scale-95 border border-emerald-400/30"
             >
               <CreditCard className="w-3.5 h-3.5 text-white" />
-              <span>إنشاء بطاقة الهوية</span>
+              <span>{isAr ? "إنشاء بطاقة الهوية" : "ID Card"}</span>
             </button>
 
             {onOpenCalendarModal && (
               <button
                 onClick={onOpenCalendarModal}
-                title="مزامنة المواعيد مع تقويم Google Calendar"
+                title={isAr ? "مزامنة المواعيد مع تقويم Google Calendar" : "Sync events with Google Calendar"}
                 className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-sky-200 hover:text-white px-3.5 py-2 rounded-2xl text-xs font-bold transition-colors"
               >
                 <Calendar className="w-3.5 h-3.5 text-sky-300" />
-                <span>تقويم المواعيد</span>
+                <span>{isAr ? "تقويم المواعيد" : "Calendar"}</span>
               </button>
             )}
 
@@ -528,7 +540,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-stone-300 hover:text-white px-3.5 py-2 rounded-2xl text-xs font-bold transition-colors"
             >
               <Archive className="w-3.5 h-3.5" />
-              <span>أرشفة</span>
+              <span>{isAr ? "أرشفة" : "Archive"}</span>
             </button>
           </div>
         </div>
@@ -555,16 +567,16 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               <div className="flex items-center gap-3 text-xs sm:text-sm text-stone-300 mt-1 flex-wrap">
                 <span className="flex items-center gap-1 font-bold text-white">
                   <Briefcase className="w-4 h-4 text-[#c9a84c]" />
-                  {candidate.job || "مهنة غير محددة"}
+                  {candidate.job || (isAr ? "مهنة غير محددة" : "Unspecified Job")}
                 </span>
                 <span>•</span>
                 <span className="flex items-center gap-1">
                   <MapPin className="w-4 h-4 text-stone-400" />
-                  {candidate.country || "الوجهة غير محددة"}
+                  {candidate.country || (isAr ? "الوجهة غير محددة" : "Unspecified Destination")}
                 </span>
                 <span>•</span>
                 <span className="text-stone-400">
-                  تاريخ التسجيل: {candidate.registrationDate}
+                  {isAr ? `تاريخ التسجيل: ${candidate.registrationDate}` : `Registered: ${candidate.registrationDate}`}
                 </span>
               </div>
             </div>
@@ -572,7 +584,9 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
 
           {/* Current Stage Switcher Pill */}
           <div className="flex flex-col items-start sm:items-end gap-1.5">
-            <span className="text-[10px] text-stone-300 font-bold uppercase tracking-wider">المرحلة الحالية</span>
+            <span className="text-[10px] text-stone-300 font-bold uppercase tracking-wider">
+              {isAr ? "المرحلة الحالية" : "Current Stage"}
+            </span>
             <div className="relative">
               <select
                 value={candidate.stage}
@@ -581,7 +595,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               >
                 {STAGES.map(s => (
                   <option key={s.id} value={s.id} className="bg-white text-[#172a46]">
-                    {s.label}
+                    {getStageLabel(s.id, isAr)}
                   </option>
                 ))}
               </select>
@@ -603,7 +617,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
             }`}
           >
             <User className="w-4 h-4" />
-            البيانات الشخصية
+            {isAr ? "البيانات الشخصية" : "Personal Info"}
           </button>
 
           <button
@@ -615,7 +629,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
             }`}
           >
             <FileCheck className="w-4 h-4" />
-            مراحل وإجراءات الاستقدام
+            {isAr ? "مراحل وإجراءات الاستقدام" : "Stages & Workflow"}
           </button>
 
           <button
@@ -627,7 +641,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
             }`}
           >
             <CreditCard className="w-4 h-4" />
-            الحسابات والمالية
+            {isAr ? "الحسابات والمالية" : "Financials"}
             {fin.outstanding > 0 && (
               <span className="w-2 h-2 rounded-full bg-rose-400" />
             )}
@@ -642,7 +656,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
             }`}
           >
             <FileText className="w-4 h-4" />
-            الملاحظات والوثائق
+            {isAr ? "الملاحظات والوثائق" : "Documents & Notes"}
           </button>
 
           <button
@@ -654,7 +668,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
             }`}
           >
             <History className="w-4 h-4" />
-            سجل التغييرات
+            {isAr ? "سجل التغييرات" : "Audit Trail"}
             {candidate.stageHistory && candidate.stageHistory.length > 0 && (
               <span className="bg-white/20 text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold">
                 {candidate.stageHistory.length}
@@ -698,26 +712,26 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
           <div className="bg-white p-6 rounded-3xl border border-stone-100 shadow-xs space-y-4">
             <div className="flex items-center gap-2 border-b border-stone-100 pb-3">
               <User className="w-5 h-5 text-[#c9a84c]" />
-              <h3 className="font-black text-sm text-[#172a46]">المعلومات الشخصية والاتصال</h3>
+              <h3 className="font-black text-sm text-[#172a46]">{isAr ? "المعلومات الشخصية والاتصال" : "Personal & Contact Information"}</h3>
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-xs">
               <div>
-                <span className="text-stone-400 font-bold block mb-1">الاسم الكامل</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "الاسم الكامل" : "Full Name"}</span>
                 <span className="font-extrabold text-[#172a46] text-sm">{candidate.firstName} {candidate.lastName}</span>
               </div>
 
               <div className="col-span-2 sm:col-span-1">
-                <span className="text-stone-400 font-bold block mb-1">رقم الهاتف والتواصل</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "رقم الهاتف والتواصل" : "Phone & Contact"}</span>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <span dir="ltr" className="font-mono font-bold text-stone-800 text-sm">
-                      {candidate.phone || "غير محدد"}
+                      {candidate.phone || (isAr ? "غير محدد" : "Not specified")}
                     </span>
                     {candidate.phone && (
                       <a
                         href={`tel:${candidate.phone}`}
-                        title="اتصال هاتفي مباشر"
+                        title={isAr ? "اتصال هاتفي مباشر" : "Direct Phone Call"}
                         className="w-7 h-7 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-700 flex items-center justify-center transition-colors active:scale-95 shadow-xs"
                       >
                         <PhoneCall className="w-3.5 h-3.5" />
@@ -731,11 +745,11 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                       href={getWhatsAppChatUrl(candidate.phone, `${candidate.firstName} ${candidate.lastName}`)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title="فتح محادثة واتساب مع المرشح"
+                      title={isAr ? "فتح محادثة واتساب مع المرشح" : "Open WhatsApp chat with candidate"}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#25D366] hover:bg-[#20ba59] text-white rounded-xl text-xs font-black transition-transform active:scale-95 shadow-2xs"
                     >
                       <MessageCircle className="w-3.5 h-3.5" />
-                      <span>مراسلة عبر واتساب</span>
+                      <span>{isAr ? "مراسلة عبر واتساب" : "WhatsApp"}</span>
                     </a>
                   ) : (
                     <button
@@ -743,7 +757,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                       onClick={onOpenEditModal}
                       className="text-[11px] text-[#c9a84c] hover:underline font-bold"
                     >
-                      + أضف رقم هاتف للمراسلة
+                      {isAr ? "+ أضف رقم هاتف للمراسلة" : "+ Add phone number"}
                     </button>
                   )}
                 </div>
@@ -751,21 +765,21 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
 
               {candidate.secondPhone && (
                 <div>
-                  <span className="text-stone-400 font-bold block mb-1">هاتف إضافي / طوارئ</span>
+                  <span className="text-stone-400 font-bold block mb-1">{isAr ? "هاتف إضافي / طوارئ" : "Secondary / Emergency Phone"}</span>
                   <div className="flex items-center gap-2">
                     <span dir="ltr" className="font-mono font-bold text-stone-800">{candidate.secondPhone}</span>
                     <a
                       href={getWhatsAppChatUrl(candidate.secondPhone, `${candidate.firstName} ${candidate.lastName}`)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title="مراسلة الهاتف الإضافي عبر واتساب"
+                      title={isAr ? "مراسلة الهاتف الإضافي عبر واتساب" : "Message secondary phone via WhatsApp"}
                       className="w-6 h-6 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 flex items-center justify-center transition-colors active:scale-95"
                     >
                       <MessageCircle className="w-3 h-3" />
                     </a>
                     <a
                       href={`tel:${candidate.secondPhone}`}
-                      title="اتصال مباشر"
+                      title={isAr ? "اتصال مباشر" : "Direct Call"}
                       className="w-6 h-6 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-700 flex items-center justify-center transition-colors active:scale-95"
                     >
                       <PhoneCall className="w-3 h-3" />
@@ -775,18 +789,20 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               )}
 
               <div>
-                <span className="text-stone-400 font-bold block mb-1">الجنس</span>
-                <span className="font-bold text-stone-800">{candidate.gender === "female" ? "أنثى" : "ذكر"}</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "الجنس" : "Gender"}</span>
+                <span className="font-bold text-stone-800">
+                  {candidate.gender === "female" ? (isAr ? "أنثى" : "Female") : (isAr ? "ذكر" : "Male")}
+                </span>
               </div>
 
               <div>
-                <span className="text-stone-400 font-bold block mb-1">تاريخ الميلاد</span>
-                <span className="font-bold text-stone-800">{candidate.dateOfBirth || "غير محدد"}</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "تاريخ الميلاد" : "Date of Birth"}</span>
+                <span className="font-bold text-stone-800">{candidate.dateOfBirth || (isAr ? "غير محدد" : "Not specified")}</span>
               </div>
 
               <div>
-                <span className="text-stone-400 font-bold block mb-1">العنوان / الإقامة</span>
-                <span className="font-bold text-stone-800">{candidate.address || candidate.city || "غير محدد"}</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "العنوان / الإقامة" : "Address / Location"}</span>
+                <span className="font-bold text-stone-800">{candidate.address || candidate.city || (isAr ? "غير محدد" : "Not specified")}</span>
               </div>
             </div>
           </div>
@@ -796,13 +812,13 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-5 h-5 text-[#c9a84c]" />
-                <h3 className="font-black text-sm text-[#172a46]">بيانات جواز السفر والتحقق</h3>
+                <h3 className="font-black text-sm text-[#172a46]">{isAr ? "بيانات جواز السفر والتحقق" : "Passport & Verification"}</h3>
               </div>
               <div className="flex items-center gap-2">
                 {isPassportExpiringSoon && (
                   <span className="text-[10px] font-black bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3" />
-                    قرب انتهاء الصلاحية
+                    {isAr ? "قرب انتهاء الصلاحية" : "Expiring Soon"}
                   </span>
                 )}
                 <button
@@ -810,33 +826,35 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                   className="bg-stone-100 hover:bg-stone-200 text-[#172a46] px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1 transition-all active:scale-95"
                 >
                   <Scan className="w-3.5 h-3.5 text-[#c9a84c]" />
-                  <span>فحص MRZ</span>
+                  <span>{isAr ? "فحص MRZ" : "Scan MRZ"}</span>
                 </button>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-xs">
               <div>
-                <span className="text-stone-400 font-bold block mb-1">رقم جواز السفر</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "رقم جواز السفر" : "Passport Number"}</span>
                 <span className="font-mono font-black text-sm text-[#172a46] bg-stone-50 px-2.5 py-1 rounded-xl border border-stone-100 inline-block">
-                  {candidate.passportNumber || "لم يسجل بعد"}
+                  {candidate.passportNumber || (isAr ? "لم يسجل بعد" : "Not recorded")}
                 </span>
               </div>
 
               <div>
-                <span className="text-stone-400 font-bold block mb-1">تاريخ الإصدار</span>
-                <span className="font-bold text-stone-800">{candidate.passportIssueDate || "غير محدد"}</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "تاريخ الإصدار" : "Issue Date"}</span>
+                <span className="font-bold text-stone-800">{candidate.passportIssueDate || (isAr ? "غير محدد" : "Not specified")}</span>
               </div>
 
               <div className="col-span-2">
-                <span className="text-stone-400 font-bold block mb-1">تاريخ الانتهاء</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "تاريخ الانتهاء" : "Expiry Date"}</span>
                 <div className={`p-2.5 rounded-2xl border font-bold flex items-center justify-between ${
                   isPassportExpiringSoon ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-stone-50 border-stone-100 text-stone-800'
                 }`}>
-                  <span>{candidate.passportExpiryDate || "غير محدد"}</span>
+                  <span>{candidate.passportExpiryDate || (isAr ? "غير محدد" : "Not specified")}</span>
                   {candidate.passportExpiryDate && (
                     <span className="text-[10px]">
-                      {new Date(candidate.passportExpiryDate) < new Date() ? "منتهي الصلاحية!" : "ساري المفعول"}
+                      {new Date(candidate.passportExpiryDate) < new Date()
+                        ? (isAr ? "منتهي الصلاحية!" : "Expired!")
+                        : (isAr ? "ساري المفعول" : "Valid")}
                     </span>
                   )}
                 </div>
@@ -849,18 +867,20 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
                 <FileCheck className="w-5 h-5 text-[#c9a84c]" />
-                <h3 className="font-black text-sm text-[#172a46]">شهادة الكفاءة المهنية الإثيوبية (COC - Certificate of Competence)</h3>
+                <h3 className="font-black text-sm text-[#172a46]">
+                  {isAr ? "شهادة الكفاءة المهنية الإثيوبية (COC - Certificate of Competence)" : "Ethiopian Certificate of Competence (COC)"}
+                </h3>
               </div>
               <div>
                 {candidate.cocStatus === "معتمد ومجتاز (Pass)" || candidate.cocStatus === "معتمد ومجتاز" ? (
                   <span className="text-xs font-black bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    معتمد ومجتاز (Pass)
+                    {isAr ? "معتمد ومجتاز (Pass)" : "Certified & Passed (Pass)"}
                   </span>
                 ) : candidate.cocStatus === "غير مجتاز (Fail)" ? (
                   <span className="text-xs font-black bg-rose-100 text-rose-800 px-3 py-1 rounded-full flex items-center gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    غير مجتاز (Fail)
+                    {isAr ? "غير مجتاز (Fail)" : "Not Passed (Fail)"}
                   </span>
                 ) : candidate.cocStatus === "قيد الاختبار والتقييم" || candidate.cocStatus === "بانتظار ظهور النتيجة" ? (
                   <span className="text-xs font-black bg-amber-100 text-amber-800 px-3 py-1 rounded-full flex items-center gap-1.5">
@@ -869,7 +889,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                   </span>
                 ) : (
                   <span className="text-xs font-black bg-stone-100 text-stone-600 px-3 py-1 rounded-full">
-                    {candidate.cocStatus || "لم يختبر بعد"}
+                    {candidate.cocStatus || (isAr ? "لم يختبر بعد" : "Not assessed yet")}
                   </span>
                 )}
               </div>
@@ -877,23 +897,29 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
               <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
-                <span className="text-stone-400 font-bold block mb-1">رقم شهادة COC</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "رقم شهادة COC" : "COC Certificate Number"}</span>
                 <span className="font-mono font-black text-sm text-[#172a46] block">
-                  {candidate.cocNumber || "غير مسجل"}
+                  {candidate.cocNumber || (isAr ? "غير مسجل" : "Not recorded")}
                 </span>
-                <span className="text-[11px] text-stone-500 block mt-0.5">معتمدة من هيئة التدريب الإثيوبية</span>
+                <span className="text-[11px] text-stone-500 block mt-0.5">
+                  {isAr ? "معتمدة من هيئة التدريب الإثيوبية" : "Accredited by Training Authority"}
+                </span>
               </div>
 
               <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
-                <span className="text-stone-400 font-bold block mb-1">حالة التقييم والاختبار</span>
-                <span className="font-bold text-stone-800 block text-sm">{candidate.cocStatus || "لم يختبر بعد"}</span>
-                <span className="text-[11px] text-stone-500 block mt-0.5">جاهزية العامل المهنية</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "حالة التقييم والاختبار" : "Assessment Status"}</span>
+                <span className="font-bold text-stone-800 block text-sm">{candidate.cocStatus || (isAr ? "لم يختبر بعد" : "Not assessed yet")}</span>
+                <span className="text-[11px] text-stone-500 block mt-0.5">
+                  {isAr ? "جاهزية العامل المهنية" : "Professional readiness"}
+                </span>
               </div>
 
               <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
-                <span className="text-stone-400 font-bold block mb-1">تاريخ إصدار الشهادة</span>
-                <span className="font-bold text-stone-800 block text-sm">{candidate.cocIssueDate || "غير محدد"}</span>
-                <span className="text-[11px] text-stone-500 block mt-0.5">صلاحية الاعتماد</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "تاريخ إصدار الشهادة" : "Certificate Issue Date"}</span>
+                <span className="font-bold text-stone-800 block text-sm">{candidate.cocIssueDate || (isAr ? "غير محدد" : "Not specified")}</span>
+                <span className="text-[11px] text-stone-500 block mt-0.5">
+                  {isAr ? "صلاحية الاعتماد" : "Accreditation validity"}
+                </span>
               </div>
             </div>
           </div>
@@ -902,26 +928,30 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
           <div className="bg-white p-6 rounded-3xl border border-stone-100 shadow-xs space-y-4 md:col-span-2">
             <div className="flex items-center gap-2 border-b border-stone-100 pb-3">
               <Building2 className="w-5 h-5 text-[#c9a84c]" />
-              <h3 className="font-black text-sm text-[#172a46]">بيانات التعاقد، الوسيط، وصاحب العمل</h3>
+              <h3 className="font-black text-sm text-[#172a46]">{isAr ? "بيانات التعاقد، الوسيط، وصاحب العمل" : "Contract, Broker & Employer Details"}</h3>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
               <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
-                <span className="text-stone-400 font-bold block mb-1">المهنة والبلد المطلوب</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "المهنة والبلد المطلوب" : "Job & Destination Country"}</span>
                 <span className="font-black text-sm text-[#172a46] block">{candidate.job}</span>
                 <span className="text-stone-600 font-bold block mt-0.5">{candidate.country}</span>
               </div>
 
               <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
-                <span className="text-stone-400 font-bold block mb-1">المكتب الخارجي / الوسيط</span>
-                <span className="font-bold text-stone-800 block text-sm">{candidate.agentName || "مباشر بدون وسيط"}</span>
-                <span className="text-[11px] text-stone-500 block mt-0.5">شريك الاستقدام</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "المكتب الخارجي / الوسيط" : "External Agency / Broker"}</span>
+                <span className="font-bold text-stone-800 block text-sm">{candidate.agentName || (isAr ? "مباشر بدون وسيط" : "Direct without broker")}</span>
+                <span className="text-[11px] text-stone-500 block mt-0.5">
+                  {isAr ? "شريك الاستقدام" : "Recruitment partner"}
+                </span>
               </div>
 
               <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
-                <span className="text-stone-400 font-bold block mb-1">الكفيل / صاحب العمل</span>
-                <span className="font-bold text-stone-800 block text-sm">{candidate.sponsorName || "بانتظار الربط مع كفيل"}</span>
-                <span className="text-[11px] text-stone-500 block mt-0.5">مدة العقد: {candidate.contractDurationYears || 2} سنوات</span>
+                <span className="text-stone-400 font-bold block mb-1">{isAr ? "الكفيل / صاحب العمل" : "Employer / Sponsor"}</span>
+                <span className="font-bold text-stone-800 block text-sm">{candidate.sponsorName || (isAr ? "بانتظار الربط مع كفيل" : "Pending employer assignment")}</span>
+                <span className="text-[11px] text-stone-500 block mt-0.5">
+                  {isAr ? `مدة العقد: ${candidate.contractDurationYears || 2} سنوات` : `Contract: ${candidate.contractDurationYears || 2} years`}
+                </span>
               </div>
             </div>
           </div>
@@ -934,11 +964,13 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               </div>
               <div>
                 <h3 className="font-black text-sm sm:text-base text-white flex items-center gap-2">
-                  <span>بطاقة تعريف طبيب القياسية (CR80 Standard ID Card)</span>
+                  <span>{isAr ? "بطاقة تعريف طبيب القياسية (CR80 Standard ID Card)" : "Professional Worker ID Card (CR80 Standard)"}</span>
                   <span className="text-[10px] bg-white/20 text-[#c9a84c] px-2 py-0.5 rounded-full font-mono">85.6 × 54 mm</span>
                 </h3>
                 <p className="text-xs text-stone-300 mt-1">
-                  تضمين بيانات الطبيب، الصورة الشخصية، رقم الجواز، شهادة الكفاءة (COC)، وحالة الفحص الطبي مع رمز التحقق الذكي والطباعة المباشرة.
+                  {isAr
+                    ? "تضمين بيانات الطبيب، الصورة الشخصية، رقم الجواز، شهادة الكفاءة (COC)، وحالة الفحص الطبي مع رمز التحقق الذكي والطباعة المباشرة."
+                    : "Includes worker photo, passport number, COC certification, medical checkup status with QR verification and direct printing."}
                 </p>
               </div>
             </div>
@@ -948,7 +980,7 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
               className="px-5 py-2.5 bg-[#c9a84c] hover:bg-[#d8b759] active:scale-95 text-[#172a46] rounded-xl font-black text-xs shadow-md flex items-center gap-2 transition-all whitespace-nowrap self-stretch sm:self-auto justify-center"
             >
               <Printer className="w-4 h-4" />
-              <span>معاينة وطباعة بطاقة الهوية</span>
+              <span>{isAr ? "معاينة وطباعة بطاقة الهوية" : "Preview & Print ID Card"}</span>
             </button>
           </div>
         </div>
@@ -964,10 +996,10 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
             <div className="flex items-center justify-between">
               <h3 className="font-black text-sm text-[#172a46] flex items-center gap-2">
                 <BadgeCheck className="w-5 h-5 text-[#c9a84c]" />
-                <span>شريط التقدم في مراحل الاستقدام</span>
+                <span>{isAr ? "شريط التقدم في مراحل الاستقدام" : "Recruitment Stage Progression"}</span>
               </h3>
               <span className="text-xs font-bold text-stone-500">
-                المرحلة: <strong className="text-[#172a46]">{currentStage.label}</strong>
+                {isAr ? "المرحلة:" : "Stage:"} <strong className="text-[#172a46]">{getStageLabel(currentStage.id, isAr)}</strong>
               </span>
             </div>
 
@@ -989,8 +1021,10 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                         : "bg-stone-50 text-stone-400 border-stone-100 hover:bg-stone-100"
                     }`}
                   >
-                    <div className="text-[10px] font-bold opacity-75 mb-1">خطوة {idx + 1}</div>
-                    <div className="text-xs font-black truncate">{stage.label}</div>
+                    <div className="text-[10px] font-bold opacity-75 mb-1">
+                      {isAr ? `خطوة ${idx + 1}` : `Step ${idx + 1}`}
+                    </div>
+                    <div className="text-xs font-black truncate">{getStageLabel(stage.id, isAr)}</div>
                   </div>
                 );
               })}
@@ -1006,27 +1040,27 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                   <div className="w-8 h-8 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
                     <Stethoscope className="w-4 h-4" />
                   </div>
-                  <h4 className="font-extrabold text-sm text-[#172a46]">الفحص الطبي (GAMCA / المركز المعتمد)</h4>
+                  <h4 className="font-extrabold text-sm text-[#172a46]">{isAr ? "الفحص الطبي (GAMCA / المركز المعتمد)" : "Medical Checkup (GAMCA / Approved Center)"}</h4>
                 </div>
               </div>
 
               <div className="space-y-3 text-xs">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-stone-400 font-bold mb-1">حالة الفحص الطبي</label>
+                    <label className="block text-stone-400 font-bold mb-1">{isAr ? "حالة الفحص الطبي" : "Medical Status"}</label>
                     <select
                       value={candidate.medicalStatus || "لم يفحص"}
                       onChange={e => onUpdate(candidate.id, { medicalStatus: e.target.value })}
                       className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-1 focus:ring-[#c9a84c]"
                     >
-                      <option value="لم يفحص">لم يفحص بعد</option>
-                      <option value="بانتظار النتيجة">بانتظار ظهور النتيجة</option>
-                      <option value="لائق طبياً (مكتمل)">لائق طبياً (مكتمل معتمد)</option>
-                      <option value="غير لائق طبياً">غير لائق طبياً (مستبعد)</option>
+                      <option value="لم يفحص">{isAr ? "لم يفحص بعد" : "Not examined yet"}</option>
+                      <option value="بانتظار النتيجة">{isAr ? "بانتظار ظهور النتيجة" : "Awaiting result"}</option>
+                      <option value="لائق طبياً (مكتمل)">{isAr ? "لائق طبياً (مكتمل معتمد)" : "Medically Fit (Approved)"}</option>
+                      <option value="غير لائق طبياً">{isAr ? "غير لائق طبياً (مستبعد)" : "Unfit (Excluded)"}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-stone-400 font-bold mb-1">تاريخ الفحص الطبي</label>
+                    <label className="block text-stone-400 font-bold mb-1">{isAr ? "تاريخ الفحص الطبي" : "Medical Checkup Date"}</label>
                     <input
                       type="date"
                       value={candidate.medicalDate || ""}
@@ -1043,14 +1077,16 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                     onClick={() => handleCalendarSyncDirect("medical")}
                     disabled={calendarSyncLoading === "medical" || !candidate.medicalDate}
                     className="px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-black flex items-center gap-2 transition-all active:scale-95 disabled:opacity-40"
-                    title={candidate.medicalDate ? "مزامنة هذا الموعد مع تقويم Google" : "حدد تاريخ الفحص أولاً لتفعيله بالتقويم"}
+                    title={candidate.medicalDate
+                      ? (isAr ? "مزامنة هذا الموعد مع تقويم Google" : "Sync this appointment to Google Calendar")
+                      : (isAr ? "حدد تاريخ الفحص أولاً لتفعيله بالتقويم" : "Select date first to enable calendar sync")}
                   >
                     {calendarSyncLoading === "medical" ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
                     ) : (
                       <CalendarPlus className="w-3.5 h-3.5 text-emerald-600" />
                     )}
-                    <span>مزامنة الفحص مع Google Calendar</span>
+                    <span>{isAr ? "مزامنة الفحص مع Google Calendar" : "Sync Medical to Google Calendar"}</span>
                   </button>
 
                   {candidate.medicalDate && (
@@ -1069,21 +1105,21 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                   <div className="w-8 h-8 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center">
                     <GraduationCap className="w-4 h-4" />
                   </div>
-                  <h4 className="font-extrabold text-sm text-[#172a46]">التدريب والتأهيل المهني</h4>
+                  <h4 className="font-extrabold text-sm text-[#172a46]">{isAr ? "التدريب والتأهيل المهني" : "Training & Vocational Prep"}</h4>
                 </div>
               </div>
 
               <div className="space-y-2 text-xs">
                 <div>
-                  <label className="block text-stone-400 font-bold mb-1">حالة التدريب والدورات</label>
+                  <label className="block text-stone-400 font-bold mb-1">{isAr ? "حالة التدريب والدورات" : "Training Status"}</label>
                   <select
                     value={candidate.trainingStatus || "لم يبدأ"}
                     onChange={e => onUpdate(candidate.id, { trainingStatus: e.target.value })}
                     className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-1 focus:ring-[#c9a84c]"
                   >
-                    <option value="لم يبدأ">لم يبدأ التدريب</option>
-                    <option value="قيد التدريب">قيد التدريب والتأهيل</option>
-                    <option value="مكتمل مع شهادة معتمدة">مكتمل مع شهادة معتمدة</option>
+                    <option value="لم يبدأ">{isAr ? "لم يبدأ التدريب" : "Not Started"}</option>
+                    <option value="قيد التدريب">{isAr ? "قيد التدريب والتأهيل" : "In Training"}</option>
+                    <option value="مكتمل مع شهادة معتمدة">{isAr ? "مكتمل مع شهادة معتمدة" : "Completed with Certificate"}</option>
                   </select>
                 </div>
               </div>
@@ -1096,31 +1132,31 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                   <div className="w-8 h-8 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
                     <FileCheck className="w-4 h-4" />
                   </div>
-                  <h4 className="font-extrabold text-sm text-[#172a46]">شهادة الكفاءة المهنية (COC)</h4>
+                  <h4 className="font-extrabold text-sm text-[#172a46]">{isAr ? "شهادة الكفاءة المهنية (COC)" : "Certificate of Competence (COC)"}</h4>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
-                  <label className="block text-stone-400 font-bold mb-1">حالة اختبار COC</label>
+                  <label className="block text-stone-400 font-bold mb-1">{isAr ? "حالة اختبار COC" : "COC Test Status"}</label>
                   <select
                     value={candidate.cocStatus || "لم يختبر بعد"}
                     onChange={e => onUpdate(candidate.id, { cocStatus: e.target.value })}
                     className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-1 focus:ring-[#c9a84c]"
                   >
-                    <option value="لم يختبر بعد">لم يختبر بعد</option>
-                    <option value="قيد الاختبار والتقييم">قيد الاختبار والتقييم</option>
-                    <option value="بانتظار ظهور النتيجة">بانتظار ظهور النتيجة</option>
-                    <option value="معتمد ومجتاز (Pass)">معتمد ومجتاز (Pass)</option>
-                    <option value="غير مجتاز (Fail)">غير مجتاز (Fail)</option>
+                    <option value="لم يختبر بعد">{isAr ? "لم يختبر بعد" : "Not tested yet"}</option>
+                    <option value="قيد الاختبار والتقييم">{isAr ? "قيد الاختبار والتقييم" : "Under Evaluation"}</option>
+                    <option value="بانتظار ظهور النتيجة">{isAr ? "بانتظار ظهور النتيجة" : "Awaiting Result"}</option>
+                    <option value="معتمد ومجتاز (Pass)">{isAr ? "معتمد ومجتاز (Pass)" : "Passed & Accredited (Pass)"}</option>
+                    <option value="غير مجتاز (Fail)">{isAr ? "غير مجتاز (Fail)" : "Failed (Fail)"}</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-stone-400 font-bold mb-1">رقم الشهادة المعتمد</label>
+                  <label className="block text-stone-400 font-bold mb-1">{isAr ? "رقم الشهادة المعتمد" : "Accredited Certificate Number"}</label>
                   <input
                     type="text"
-                    placeholder="مثال: COC-ETH-8821"
+                    placeholder="COC-ETH-8821"
                     value={candidate.cocNumber || ""}
                     onChange={e => onUpdate(candidate.id, { cocNumber: e.target.value })}
                     className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-1 focus:ring-[#c9a84c]"
@@ -1136,29 +1172,29 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                   <div className="w-8 h-8 rounded-2xl bg-pink-50 text-pink-600 flex items-center justify-center">
                     <FileCheck className="w-4 h-4" />
                   </div>
-                  <h4 className="font-extrabold text-sm text-[#172a46]">التأشيرة ومعاملة السفارة</h4>
+                  <h4 className="font-extrabold text-sm text-[#172a46]">{isAr ? "التأشيرة ومعاملة السفارة" : "Visa & Embassy Processing"}</h4>
                 </div>
               </div>
 
               <div className="space-y-2 text-xs">
                 <div>
-                  <label className="block text-stone-400 font-bold mb-1">حالة التأشيرة</label>
+                  <label className="block text-stone-400 font-bold mb-1">{isAr ? "حالة التأشيرة" : "Visa Status"}</label>
                   <select
                     value={candidate.visaStatus || "لم تقدم"}
                     onChange={e => onUpdate(candidate.id, { visaStatus: e.target.value })}
                     className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-1 focus:ring-[#c9a84c]"
                   >
-                    <option value="لم تقدم">لم تقدم للسفارة بعد</option>
-                    <option value="قيد الإجراء بالسفارة">قيد الإجراء بالسفارة / القنصلية</option>
-                    <option value="صدرت التأشيرة بنجاح">صدرت التأشيرة بنجاح</option>
-                    <option value="مرفوضة">مرفوضة من السفارة</option>
+                    <option value="لم تقدم">{isAr ? "لم تقدم للسفارة بعد" : "Not submitted yet"}</option>
+                    <option value="قيد الإجراء بالسفارة">{isAr ? "قيد الإجراء بالسفارة / القنصلية" : "In Process at Embassy"}</option>
+                    <option value="صدرت التأشيرة بنجاح">{isAr ? "صدرت التأشيرة بنجاح" : "Visa Issued"}</option>
+                    <option value="مرفوضة">{isAr ? "مرفوضة من السفارة" : "Rejected by Embassy"}</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-stone-400 font-bold mb-1">رقم التأشيرة</label>
+                  <label className="block text-stone-400 font-bold mb-1">{isAr ? "رقم التأشيرة" : "Visa Number"}</label>
                   <input
                     type="text"
-                    placeholder="مثال: VSA-SA-90123"
+                    placeholder="VSA-SA-90123"
                     value={candidate.visaNumber || ""}
                     onChange={e => onUpdate(candidate.id, { visaNumber: e.target.value })}
                     className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold outline-none focus:ring-1 focus:ring-[#c9a84c]"
@@ -1174,26 +1210,26 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                   <div className="w-8 h-8 rounded-2xl bg-cyan-50 text-cyan-600 flex items-center justify-center">
                     <Plane className="w-4 h-4" />
                   </div>
-                  <h4 className="font-extrabold text-sm text-[#172a46]">حجز تذكرة الطيران وموعد السفر</h4>
+                  <h4 className="font-extrabold text-sm text-[#172a46]">{isAr ? "حجز تذكرة الطيران وموعد السفر" : "Flight Booking & Travel Schedule"}</h4>
                 </div>
               </div>
 
               <div className="space-y-2 text-xs">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-stone-400 font-bold mb-1">حالة التذكرة</label>
+                    <label className="block text-stone-400 font-bold mb-1">{isAr ? "حالة التذكرة" : "Ticket Status"}</label>
                     <select
                       value={candidate.flightStatus || "لم تحجز بعد"}
                       onChange={e => onUpdate(candidate.id, { flightStatus: e.target.value })}
                       className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-1 focus:ring-[#c9a84c]"
                     >
-                      <option value="لم تحجز بعد">لم تحجز بعد</option>
-                      <option value="تم تأكيد التذكرة">تم تأكيد التذكرة</option>
-                      <option value="سافر">سافر بنجاح</option>
+                      <option value="لم تحجز بعد">{isAr ? "لم تحجز بعد" : "Not booked yet"}</option>
+                      <option value="تم تأكيد التذكرة">{isAr ? "تم تأكيد التذكرة" : "Ticket Confirmed"}</option>
+                      <option value="سافر">{isAr ? "سافر بنجاح" : "Departed / Traveled"}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-stone-400 font-bold mb-1">تاريخ الرحلة</label>
+                    <label className="block text-stone-400 font-bold mb-1">{isAr ? "تاريخ الرحلة" : "Flight Date"}</label>
                     <input
                       type="date"
                       value={candidate.flightDate || ""}
@@ -1203,10 +1239,10 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                   </div>
                 </div>
                 <div>
-                  <label className="block text-stone-400 font-bold mb-1">رقم التذكرة / خط الطيران</label>
+                  <label className="block text-stone-400 font-bold mb-1">{isAr ? "رقم التذكرة / خط الطيران" : "Ticket Number / Airline"}</label>
                   <input
                     type="text"
-                    placeholder="مثال: ET-9012 الخطوط الإثيوبية"
+                    placeholder={isAr ? "مثال: ET-9012 الخطوط الإثيوبية" : "e.g. ET-9012 Ethiopian Airlines"}
                     value={candidate.flightTicketNumber || ""}
                     onChange={e => onUpdate(candidate.id, { flightTicketNumber: e.target.value })}
                     className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold outline-none focus:ring-1 focus:ring-[#c9a84c]"
@@ -1220,14 +1256,16 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
                     onClick={() => handleCalendarSyncDirect("flight")}
                     disabled={calendarSyncLoading === "flight" || !candidate.flightDate}
                     className="px-3.5 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-black flex items-center gap-2 transition-all active:scale-95 disabled:opacity-40"
-                    title={candidate.flightDate ? "مزامنة موعد الرحلة مع تقويم Google" : "حدد تاريخ الرحلة أولاً لتفعيله بالتقويم"}
+                    title={candidate.flightDate
+                      ? (isAr ? "مزامنة موعد الرحلة مع تقويم Google" : "Sync flight event to Google Calendar")
+                      : (isAr ? "حدد تاريخ الرحلة أولاً لتفعيله بالتقويم" : "Select flight date first to enable sync")}
                   >
                     {calendarSyncLoading === "flight" ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600" />
                     ) : (
                       <Plane className="w-3.5 h-3.5 text-sky-600" />
                     )}
-                    <span>مزامنة الرحلة مع Google Calendar</span>
+                    <span>{isAr ? "مزامنة الرحلة مع Google Calendar" : "Sync Flight to Google Calendar"}</span>
                   </button>
 
                   {candidate.flightDate && (
@@ -1787,6 +1825,8 @@ export const CandidateProfile: React.FC<CandidateProfileProps> = ({
         onClose={() => setShowScannerModal(false)}
         onApplyData={(data) => {
           onUpdate(candidate.id, {
+            firstName: data.firstName || candidate.firstName,
+            lastName: (data.lastName && data.lastName !== "-") ? data.lastName : candidate.lastName,
             passportNumber: data.passportNumber || candidate.passportNumber,
             passportExpiryDate: data.passportExpiryDate || candidate.passportExpiryDate,
             dateOfBirth: data.dateOfBirth || candidate.dateOfBirth,

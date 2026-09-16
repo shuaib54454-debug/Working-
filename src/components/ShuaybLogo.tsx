@@ -1,4 +1,5 @@
 import React from "react";
+import { useLanguage } from "../lib/LanguageContext";
 
 interface ShuaybLogoProps {
   className?: string;
@@ -13,6 +14,7 @@ export const ShuaybLogo: React.FC<ShuaybLogoProps> = ({
   variant = "horizontal",
   showSubtitle = true
 }) => {
+  const { isAr } = useLanguage();
   // Dimensions based on size
   const iconSizes = {
     sm: "w-8 h-8",
@@ -157,11 +159,13 @@ export const ShuaybLogo: React.FC<ShuaybLogoProps> = ({
         {/* Bridge Vector Line */}
         <div className="w-48 h-0.5 bg-gradient-to-r from-transparent via-[#C9A84C] to-transparent my-2" />
 
-        {/* Arabic Subtitle */}
+        {/* Subtitle */}
         {showSubtitle && (
           <>
             <p className="text-xs sm:text-sm font-extrabold text-[#172a46] max-w-xs leading-snug">
-              مكتب تسهيل خدمات وتسويق المنتجات الزراعية وغيرها الإثيوبية
+              {isAr
+                ? "مكتب تسهيل خدمات وتسويق المنتجات الزراعية وغيرها الإثيوبية"
+                : "Facilitating Services & Ethiopian Agricultural Product Marketing"}
             </p>
 
             {/* 3 Pillars */}
@@ -170,7 +174,9 @@ export const ShuaybLogo: React.FC<ShuaybLogoProps> = ({
                 <div className="w-8 h-8 rounded-full bg-[#3B6B38] text-white flex items-center justify-center text-xs font-bold mb-1 shadow-xs">
                   ✓
                 </div>
-                <span className="text-[10px] font-extrabold text-stone-800">تسهيل الخدمات</span>
+                <span className="text-[10px] font-extrabold text-stone-800">
+                  {isAr ? "تسهيل الخدمات" : "Facilitation"}
+                </span>
                 <span className="text-[8px] text-stone-500 uppercase">Service Facilitation</span>
               </div>
 
@@ -178,7 +184,9 @@ export const ShuaybLogo: React.FC<ShuaybLogoProps> = ({
                 <div className="w-8 h-8 rounded-full bg-[#486D32] text-white flex items-center justify-center text-xs font-bold mb-1 shadow-xs">
                   🌱
                 </div>
-                <span className="text-[10px] font-extrabold text-stone-800">تسوق المنتجات</span>
+                <span className="text-[10px] font-extrabold text-stone-800">
+                  {isAr ? "تسويق المنتجات" : "Trade & Products"}
+                </span>
                 <span className="text-[8px] text-stone-500 uppercase">Product Marketing</span>
               </div>
 
@@ -186,16 +194,20 @@ export const ShuaybLogo: React.FC<ShuaybLogoProps> = ({
                 <div className="w-8 h-8 rounded-full bg-[#8A6A32] text-white flex items-center justify-center text-xs font-bold mb-1 shadow-xs">
                   🌐
                 </div>
-                <span className="text-[10px] font-extrabold text-stone-800">منتجات إثيوبية</span>
+                <span className="text-[10px] font-extrabold text-stone-800">
+                  {isAr ? "منتجات إثيوبية" : "Ethiopian Goods"}
+                </span>
                 <span className="text-[8px] text-stone-500 uppercase">Ethiopian Products</span>
               </div>
             </div>
 
             {/* Slogan */}
             <div className="mt-3 text-center">
-              <p className="text-[11px] font-black text-[#8B262A]">
-                نربط الفرص ... نصنع المستقبل
-              </p>
+              {isAr && (
+                <p className="text-[11px] font-black text-[#8B262A]">
+                  نربط الفرص ... نصنع المستقبل
+                </p>
+              )}
               <p className="text-[9px] font-semibold text-stone-500 tracking-wider uppercase">
                 CONNECTING OPPORTUNITIES ... BUILDING THE FUTURE
               </p>
@@ -221,7 +233,9 @@ export const ShuaybLogo: React.FC<ShuaybLogoProps> = ({
         </div>
         {showSubtitle && (
           <p className="text-[10px] sm:text-[11px] opacity-85 truncate max-w-[200px] sm:max-w-md">
-            مكتب تسهيل خدمات وتسويق المنتجات الزراعية وغيرها الإثيوبية
+            {isAr
+              ? "مكتب تسهيل خدمات وتسويق المنتجات الزراعية وغيرها الإثيوبية"
+              : "Ethiopian Services Facilitation & Agricultural Trade Bridge"}
           </p>
         )}
       </div>

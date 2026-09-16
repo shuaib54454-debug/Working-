@@ -72,14 +72,20 @@ function getFirebaseAuthForProject(projectId: string): Auth {
 
 // Enable CORS for Web and Mobile Capacitor WebViews (Android localhost, Capacitor scheme, etc.)
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  const origin = req.headers.origin;
+  if (origin) {
+    res.header("Access-Control-Allow-Origin", origin);
+  } else {
+    res.header("Access-Control-Allow-Origin", "*");
+  }
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
   res.header(
     "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control"
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma, X-Client-Version, X-Platform"
   );
   if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
+    return res.sendStatus(204);
   }
   next();
 });
@@ -214,6 +220,29 @@ async function verifyFirebaseIdToken(
     });
   }
 }
+
+// Explicit Public Manifest & PWA Assets for Store Packagers (PWABuilder / Google Play / Bubblewrap)
+app.get(["/manifest.json", "/manifest.webmanifest"], (req, res) => {
+  res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  const p1 = path.join(process.cwd(), "public", "manifest.json");
+  const p2 = path.join(process.cwd(), "dist", "manifest.json");
+  if (fs.existsSync(p1)) return res.sendFile(p1);
+  if (fs.existsSync(p2)) return res.sendFile(p2);
+  return res.status(404).end();
+});
+
+app.get("/sw.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "public, max-age=0");
+  const p1 = path.join(process.cwd(), "public", "sw.js");
+  const p2 = path.join(process.cwd(), "dist", "sw.js");
+  if (fs.existsSync(p1)) return res.sendFile(p1);
+  if (fs.existsSync(p2)) return res.sendFile(p2);
+  return res.status(404).end();
+});
 
 /**
  * Health Check Endpoint

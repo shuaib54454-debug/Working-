@@ -20,6 +20,7 @@ import { Candidate, AgencySettings, StageId } from "../types";
 import { getTodayDateString } from "../data/initialData";
 import { PassportScannerModal } from "./PassportScannerModal";
 import { findCandidateDuplicates } from "../lib/candidateDuplicate";
+import { useLanguage } from "../lib/LanguageContext";
 
 interface AddCandidateWizardProps {
   isOpen: boolean;
@@ -34,9 +35,11 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
   onAdd,
   settings
 }) => {
+  const { t, isAr } = useLanguage();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [isScannedWithMRZ, setIsScannedWithMRZ] = useState(false);
+  const [scanAppliedMessage, setScanAppliedMessage] = useState<string | null>(null);
 
   // Form State
   const [firstName, setFirstName] = useState("");
@@ -48,11 +51,11 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
   const [address, setAddress] = useState("");
 
   const [job, setJob] = useState("");
-  const [country, setCountry] = useState("المملكة العربية السعودية");
+  const [country, setCountry] = useState(isAr ? "المملكة العربية السعودية" : "Saudi Arabia");
   const [passportNumber, setPassportNumber] = useState("");
   const [passportExpiryDate, setPassportExpiryDate] = useState("");
   const [cocNumber, setCocNumber] = useState("");
-  const [cocStatus, setCocStatus] = useState("لم يختبر بعد");
+  const [cocStatus, setCocStatus] = useState(isAr ? "لم يختبر بعد" : "Not Tested Yet");
   const [cocIssueDate, setCocIssueDate] = useState("");
   const [agentName, setAgentName] = useState("");
   const [sponsorName, setSponsorName] = useState("");
@@ -62,7 +65,7 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
   const [hasInitialPayment, setHasInitialPayment] = useState(false);
   const [initialPaymentAmount, setInitialPaymentAmount] = useState("");
   const [initialPaymentMethod, setInitialPaymentMethod] = useState<"كاش" | "تحويل بنكي" | "شيك">("تحويل بنكي");
-  const [initialPaymentNote, setInitialPaymentNote] = useState("دفعة مقدمة عند التسجيل");
+  const [initialPaymentNote, setInitialPaymentNote] = useState(isAr ? "دفعة مقدمة عند التسجيل" : "Initial registration down-payment");
 
   if (!isOpen) return null;
 
@@ -78,24 +81,28 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
     country: string;
     job?: string;
   }) => {
-    if (data.firstName) setFirstName(data.firstName);
+    if (data.firstName) setFirstName(data.firstName.trim());
     if (data.lastName) {
-      setLastName(data.lastName === "-" ? data.firstName : data.lastName);
+      setLastName(data.lastName === "-" ? data.firstName.trim() : data.lastName.trim());
     } else if (data.firstName) {
-      setLastName(data.firstName);
+      setLastName(data.firstName.trim());
     }
-    if (data.passportNumber) setPassportNumber(data.passportNumber);
-    if (data.passportExpiryDate) setPassportExpiryDate(data.passportExpiryDate);
-    if (data.dateOfBirth) setDateOfBirth(data.dateOfBirth);
+    if (data.passportNumber) setPassportNumber(data.passportNumber.trim());
+    if (data.passportExpiryDate) setPassportExpiryDate(data.passportExpiryDate.trim());
+    if (data.dateOfBirth) setDateOfBirth(data.dateOfBirth.trim());
     if (data.gender) setGender(data.gender);
-    if (data.country) setCountry(data.country);
-    if (data.job) setJob(data.job);
+    if (data.job) setJob(data.job.trim());
     setIsScannedWithMRZ(true);
+    setScanAppliedMessage(
+      isAr
+        ? `تم استخراج وتعبئة بيانات الجواز بنجاح: ${data.firstName} (${data.passportNumber || "بدون رقم"})`
+        : `Passport data extracted & filled successfully: ${data.firstName} (${data.passportNumber || "No number"})`
+    );
   };
 
   const handleFinish = () => {
     if (!firstName.trim() || !lastName.trim() || !phone.trim() || !job.trim() || !country.trim()) {
-      alert("يرجى ملء الحقول الأساسية المطلوبة.");
+      alert(isAr ? "يرجى ملء الحقول الأساسية المطلوبة." : "Please fill in all required fields.");
       return;
     }
 
@@ -147,7 +154,9 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
       const confirmed = duplicateCheck.confirmed[0];
       if (confirmed) {
         alert(
-          `⚠️ هذا المرشح مسجل مسبقًا.\n\nالاسم: ${confirmed.candidate.firstName} ${confirmed.candidate.lastName}\nرقم الجواز: ${confirmed.candidate.passportNumber || "غير مسجل"}\nالرقم الداخلي: ${confirmed.candidate.id}\n\nلن يتم إنشاء سجل مكرر.`
+          isAr
+            ? `⚠️ هذا المرشح مسجل مسبقًا.\n\nالاسم: ${confirmed.candidate.firstName} ${confirmed.candidate.lastName}\nرقم الجواز: ${confirmed.candidate.passportNumber || "غير مسجل"}\nالرقم الداخلي: ${confirmed.candidate.id}\n\nلن يتم إنشاء سجل مكرر.`
+            : `⚠️ This candidate is already registered.\n\nName: ${confirmed.candidate.firstName} ${confirmed.candidate.lastName}\nPassport: ${confirmed.candidate.passportNumber || "Not recorded"}\nInternal ID: ${confirmed.candidate.id}\n\nDuplicate record will not be created.`
         );
         return;
       }
@@ -155,7 +164,9 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
       const possible = duplicateCheck.possible[0];
       if (possible) {
         const continueRegistration = window.confirm(
-          `⚠️ يوجد مرشح يحتمل أن يكون نفس الشخص.\n\nالاسم: ${possible.candidate.firstName} ${possible.candidate.lastName}\nتاريخ الميلاد: ${possible.candidate.dateOfBirth || "غير مسجل"}\nالرقم الداخلي: ${possible.candidate.id}\n\nهل تريد الاستمرار وتسجيله كمرشح جديد؟`
+          isAr
+            ? `⚠️ يوجد مرشح يحتمل أن يكون نفس الشخص.\n\nالاسم: ${possible.candidate.firstName} ${possible.candidate.lastName}\nتاريخ الميلاد: ${possible.candidate.dateOfBirth || "غير مسجل"}\nالرقم الداخلي: ${possible.candidate.id}\n\nهل تريد الاستمرار وتسجيله كمرشح جديد؟`
+            : `⚠️ A potential matching candidate already exists.\n\nName: ${possible.candidate.firstName} ${possible.candidate.lastName}\nDOB: ${possible.candidate.dateOfBirth || "Not recorded"}\nInternal ID: ${possible.candidate.id}\n\nDo you want to continue registering as a new candidate?`
         );
         if (!continueRegistration) return;
       }
@@ -177,8 +188,13 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-black text-base">تسجيل مرشح جديد (معالج الإدخال)</h3>
-              <p className="text-xs text-stone-300">الرقم المخصص تلقائياً: <strong className="text-[#c9a84c] font-mono">{nextCandidateId}</strong></p>
+              <h3 className="font-black text-base">
+                {isAr ? "تسجيل مرشح جديد (معالج الإدخال)" : "Register New Candidate (Wizard)"}
+              </h3>
+              <p className="text-xs text-stone-300">
+                {isAr ? "الرقم المخصص تلقائياً:" : "Assigned ID:"}{" "}
+                <strong className="text-[#c9a84c] font-mono">{nextCandidateId}</strong>
+              </p>
             </div>
           </div>
           <button
@@ -205,7 +221,7 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                 1
               </div>
               <span className={`text-[11px] font-bold mt-1 ${step >= 1 ? "text-[#172a46]" : "text-stone-400"}`}>
-                البيانات الشخصية
+                {isAr ? "البيانات الشخصية" : "Personal Info"}
               </span>
             </div>
 
@@ -219,7 +235,7 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                 2
               </div>
               <span className={`text-[11px] font-bold mt-1 ${step >= 2 ? "text-[#172a46]" : "text-stone-400"}`}>
-                المهنة والجواز
+                {isAr ? "المهنة والجواز" : "Job & Passport"}
               </span>
             </div>
 
@@ -233,7 +249,7 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                 3
               </div>
               <span className={`text-[11px] font-bold mt-1 ${step === 3 ? "text-[#172a46]" : "text-stone-400"}`}>
-                الأتعاب والمالية
+                {isAr ? "الأتعاب والمالية" : "Fees & Finance"}
               </span>
             </div>
           </div>
@@ -249,15 +265,19 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h4 className="font-black text-xs sm:text-sm">ماسح الجواز الذكي (MRZ + OCR + تدقيق التواريخ)</h4>
+                  <h4 className="font-black text-xs sm:text-sm">
+                    {isAr ? "ماسح الجواز الذكي (MRZ + OCR + تدقيق التواريخ)" : "AI Passport Scanner (MRZ + OCR + Verification)"}
+                  </h4>
                   {isScannedWithMRZ && (
                     <span className="bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-400/30 flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" /> تم الفحص والمطابقة
+                      <ShieldCheck className="w-3 h-3" /> {isAr ? "تم الفحص والمطابقة" : "Verified & Matched"}
                     </span>
                   )}
                 </div>
                 <p className="text-[11px] text-stone-300">
-                  استخراج آلي وتعبئة فورية ومطابقة كود MRZ مع الحقول والتحقق الرياضي من صلاحية الجواز
+                  {isAr
+                    ? "استخراج آلي وتعبئة فورية ومطابقة كود MRZ مع الحقول والتحقق الرياضي من صلاحية الجواز"
+                    : "Automated extraction, autofill, and MRZ checksum validation of passport fields"}
                 </p>
               </div>
             </div>
@@ -268,20 +288,38 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
               className="bg-[#c9a84c] hover:bg-[#d8b759] text-[#172a46] px-4 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95 whitespace-nowrap self-stretch sm:self-auto"
             >
               <Camera className="w-3.5 h-3.5" />
-              <span>فحص ومسح الجواز الآن</span>
+              <span>{isAr ? "فحص ومسح الجواز الآن" : "Scan Passport Now"}</span>
             </button>
           </div>
+
+          {scanAppliedMessage && (
+            <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-2xl text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-xs animate-in fade-in">
+              <div className="flex items-center gap-2 font-bold">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{scanAppliedMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStep(2)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl font-bold text-[11px] shrink-0"
+              >
+                {isAr ? "معاينة بيانات الجواز والمهنة (خطوة 2) ←" : "Review Passport & Job (Step 2) →"}
+              </button>
+            </div>
+          )}
 
           {/* STEP 1: Personal Info */}
           {step === 1 && (
             <div className="space-y-4 animate-in fade-in">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">الاسم الأول *</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "الاسم الأول *" : "First Name *"}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="مثال: أحمد"
+                    placeholder={isAr ? "مثال: أحمد" : "e.g. Ahmed"}
                     value={firstName}
                     onChange={e => setFirstName(e.target.value)}
                     className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
@@ -289,11 +327,13 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">اسم العائلة / اللقب *</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "اسم العائلة / اللقب *" : "Last Name / Surname *"}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="مثال: يوسف إبراهيم"
+                    placeholder={isAr ? "مثال: يوسف إبراهيم" : "e.g. Yusuf Ibrahim"}
                     value={lastName}
                     onChange={e => setLastName(e.target.value)}
                     className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
@@ -301,7 +341,9 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">رقم الهاتف الأساسي *</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "رقم الهاتف الأساسي *" : "Primary Phone Number *"}
+                  </label>
                   <input
                     type="text"
                     required
@@ -309,36 +351,42 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                     placeholder="+251 9X XXX XXXX"
                     value={phone}
                     onChange={e => setPhone(e.target.value)}
-                    className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c] text-right"
+                    className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">رقم هاتف إضافي (اختياري)</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "رقم هاتف إضافي (اختياري)" : "Secondary Phone (Optional)"}
+                  </label>
                   <input
                     type="text"
                     dir="ltr"
                     placeholder="+251 9X XXX XXXX"
                     value={secondPhone}
                     onChange={e => setSecondPhone(e.target.value)}
-                    className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c] text-right"
+                    className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">الجنس</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "الجنس" : "Gender"}
+                  </label>
                   <select
                     value={gender}
                     onChange={e => setGender(e.target.value as any)}
                     className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
                   >
-                    <option value="female">أنثى</option>
-                    <option value="male">ذكر</option>
+                    <option value="female">{isAr ? "أنثى" : "Female"}</option>
+                    <option value="male">{isAr ? "ذكر" : "Male"}</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">تاريخ الميلاد</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "تاريخ الميلاد" : "Date of Birth"}
+                  </label>
                   <input
                     type="date"
                     value={dateOfBirth}
@@ -348,10 +396,12 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block font-bold text-stone-700 mb-1">العنوان أو مكان الإقامة</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "العنوان أو مكان الإقامة" : "Address / Residence"}
+                  </label>
                   <input
                     type="text"
-                    placeholder="مثال: أديس أبابا - كيركوس"
+                    placeholder={isAr ? "مثال: أديس أبابا - كيركوس" : "e.g. Addis Ababa - Kirkos"}
                     value={address}
                     onChange={e => setAddress(e.target.value)}
                     className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
@@ -366,11 +416,13 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
             <div className="space-y-4 animate-in fade-in">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">المهنة / الوظيفة المستهدفة *</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "المهنة / الوظيفة المستهدفة *" : "Target Job / Occupation *"}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="مثال: عاملة منزلية، سائق خاص، طاهي، تمريض..."
+                    placeholder={isAr ? "مثال: عاملة منزلية، سائق خاص، طاهي..." : "e.g. Housemaid, Private Driver, Cook..."}
                     value={job}
                     onChange={e => setJob(e.target.value)}
                     className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
@@ -378,27 +430,63 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">دولة العمل / الوجهة *</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "دولة العمل / الوجهة *" : "Destination Country *"}
+                  </label>
                   <select
                     value={country}
                     onChange={e => setCountry(e.target.value)}
                     className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
                   >
-                    <option value="المملكة العربية السعودية">المملكة العربية السعودية</option>
-                    <option value="دولة الإمارات العربية المتحدة">دولة الإمارات العربية المتحدة</option>
-                    <option value="دولة الكويت">دولة الكويت</option>
-                    <option value="دولة قطر">دولة قطر</option>
-                    <option value="سلطنة عمان">سلطنة عمان</option>
-                    <option value="مملكة البحرين">مملكة البحرين</option>
-                    <option value="أخرى">دولة أخرى</option>
+                    <option value={isAr ? "المملكة العربية السعودية" : "Saudi Arabia"}>
+                      {isAr ? "المملكة العربية السعودية" : "Saudi Arabia"}
+                    </option>
+                    <option value={isAr ? "دولة الإمارات العربية المتحدة" : "United Arab Emirates"}>
+                      {isAr ? "دولة الإمارات العربية المتحدة" : "United Arab Emirates"}
+                    </option>
+                    <option value={isAr ? "دولة الكويت" : "Kuwait"}>
+                      {isAr ? "دولة الكويت" : "Kuwait"}
+                    </option>
+                    <option value={isAr ? "دولة قطر" : "Qatar"}>
+                      {isAr ? "دولة قطر" : "Qatar"}
+                    </option>
+                    <option value={isAr ? "سلطنة عمان" : "Oman"}>
+                      {isAr ? "سلطنة عمان" : "Oman"}
+                    </option>
+                    <option value={isAr ? "مملكة البحرين" : "Bahrain"}>
+                      {isAr ? "مملكة البحرين" : "Bahrain"}
+                    </option>
+                    <option value={isAr ? "أخرى" : "Other"}>
+                      {isAr ? "دولة أخرى" : "Other Country"}
+                    </option>
+                    {country && ![
+                      "المملكة العربية السعودية",
+                      "دولة الإمارات العربية المتحدة",
+                      "دولة الكويت",
+                      "دولة قطر",
+                      "سلطنة عمان",
+                      "مملكة البحرين",
+                      "أخرى",
+                      "Saudi Arabia",
+                      "United Arab Emirates",
+                      "Kuwait",
+                      "Qatar",
+                      "Oman",
+                      "Bahrain",
+                      "Other"
+                    ].includes(country) && (
+                      <option value={country}>{country}</option>
+                    )}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">رقم جواز السفر</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "رقم جواز السفر" : "Passport Number"}
+                  </label>
                   <input
                     type="text"
-                    placeholder="مثال: EP1234567"
+                    placeholder="EP1234567"
                     value={passportNumber}
                     onChange={e => setPassportNumber(e.target.value)}
                     className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
@@ -406,7 +494,9 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">تاريخ انتهاء الجواز</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "تاريخ انتهاء الجواز" : "Passport Expiry Date"}
+                  </label>
                   <input
                     type="date"
                     value={passportExpiryDate}
@@ -416,10 +506,12 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">المكتب الخارجي / الوسيط</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "المكتب الخارجي / الوسيط" : "External Agency / Broker"}
+                  </label>
                   <input
                     type="text"
-                    placeholder="مثال: مكتب الرياض للخدمات"
+                    placeholder={isAr ? "مثال: مكتب الرياض للخدمات" : "e.g. Riyadh Services Office"}
                     value={agentName}
                     onChange={e => setAgentName(e.target.value)}
                     className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
@@ -427,10 +519,12 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 mb-1">اسم الكفيل / جهة العمل</label>
+                  <label className="block font-bold text-stone-700 mb-1">
+                    {isAr ? "اسم الكفيل / جهة العمل" : "Sponsor Name / Employer"}
+                  </label>
                   <input
                     type="text"
-                    placeholder="اسم العائلة أو الشركة"
+                    placeholder={isAr ? "اسم العائلة أو الشركة" : "Family or Company name"}
                     value={sponsorName}
                     onChange={e => setSponsorName(e.target.value)}
                     className="w-full p-3 bg-stone-50 border border-stone-200 rounded-2xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
@@ -442,39 +536,57 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                   <div className="flex items-center justify-between">
                     <span className="font-black text-[#172a46] flex items-center gap-1.5">
                       <FileCheck className="w-4 h-4 text-[#c9a84c]" />
-                      شهادة الكفاءة المهنية الإثيوبية (COC - Certificate of Competence)
+                      {isAr
+                        ? "شهادة الكفاءة المهنية الإثيوبية (COC - Certificate of Competence)"
+                        : "Ethiopian Competence Certificate (COC)"}
                     </span>
                     <span className="text-[10px] text-stone-500 font-bold bg-white px-2 py-0.5 rounded-md border border-stone-200">
-                      اختياري / يمكن تحديثه لاحقاً
+                      {isAr ? "اختياري / يمكن تحديثه لاحقاً" : "Optional / Update later"}
                     </span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block font-bold text-stone-700 mb-1">رقم شهادة COC</label>
+                      <label className="block font-bold text-stone-700 mb-1">
+                        {isAr ? "رقم شهادة COC" : "COC Certificate No."}
+                      </label>
                       <input
                         type="text"
-                        placeholder="مثال: COC-ETH-2024-8891"
+                        placeholder="COC-ETH-2024-8891"
                         value={cocNumber}
                         onChange={e => setCocNumber(e.target.value)}
                         className="w-full p-2.5 bg-white border border-stone-200 rounded-xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold text-stone-700 mb-1">حالة شهادة COC</label>
+                      <label className="block font-bold text-stone-700 mb-1">
+                        {isAr ? "حالة شهادة COC" : "COC Status"}
+                      </label>
                       <select
                         value={cocStatus}
                         onChange={e => setCocStatus(e.target.value)}
                         className="w-full p-2.5 bg-white border border-stone-200 rounded-xl font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
                       >
-                        <option value="لم يختبر بعد">لم يختبر بعد</option>
-                        <option value="قيد الاختبار والتقييم">قيد الاختبار والتقييم</option>
-                        <option value="بانتظار ظهور النتيجة">بانتظار ظهور النتيجة</option>
-                        <option value="معتمد ومجتاز (Pass)">معتمد ومجتاز (Pass)</option>
-                        <option value="غير مجتاز (Fail)">غير مجتاز (Fail)</option>
+                        <option value={isAr ? "لم يختبر بعد" : "Not Tested Yet"}>
+                          {isAr ? "لم يختبر بعد" : "Not Tested Yet"}
+                        </option>
+                        <option value={isAr ? "قيد الاختبار والتقييم" : "Under Testing"}>
+                          {isAr ? "قيد الاختبار والتقييم" : "Under Testing"}
+                        </option>
+                        <option value={isAr ? "بانتظار ظهور النتيجة" : "Awaiting Result"}>
+                          {isAr ? "بانتظار ظهور النتيجة" : "Awaiting Result"}
+                        </option>
+                        <option value={isAr ? "معتمد ومجتاز (Pass)" : "Passed (Certified)"}>
+                          {isAr ? "معتمد ومجتاز (Pass)" : "Passed (Certified)"}
+                        </option>
+                        <option value={isAr ? "غير مجتاز (Fail)" : "Failed"}>
+                          {isAr ? "غير مجتاز (Fail)" : "Failed"}
+                        </option>
                       </select>
                     </div>
                     <div>
-                      <label className="block font-bold text-stone-700 mb-1">تاريخ إصدار الشهادة</label>
+                      <label className="block font-bold text-stone-700 mb-1">
+                        {isAr ? "تاريخ إصدار الشهادة" : "Issue Date"}
+                      </label>
                       <input
                         type="date"
                         value={cocIssueDate}
@@ -494,13 +606,15 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold text-stone-700 mb-1">
-                    إجمالي أتعاب ورسوم الاستقدام المتفق عليها ({settings.currency}) *
+                    {isAr
+                      ? `إجمالي أتعاب ورسوم الاستقدام المتفق عليها (${settings.currency}) *`
+                      : `Total Agreed Recruitment Fees (${settings.currency}) *`}
                   </label>
                   <input
                     type="number"
                     required
                     min="0"
-                    placeholder="مثال: 120000"
+                    placeholder="120000"
                     value={totalFees}
                     onChange={e => setTotalFees(e.target.value)}
                     className="w-full p-3.5 bg-stone-50 border border-stone-200 rounded-2xl text-base font-black text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
@@ -509,13 +623,19 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
 
                 <div>
                   <label className="block font-bold text-amber-800 mb-1 flex items-center justify-between">
-                    <span>بند سداد مستحقات على الوكالة ({settings.currency})</span>
-                    <span className="text-[10px] text-amber-600 font-bold bg-amber-100 px-2 py-0.5 rounded-md">يخصم من الأتعاب</span>
+                    <span>
+                      {isAr
+                        ? `بند سداد مستحقات على الوكالة (${settings.currency})`
+                        : `Agency Liabilities / Deductions (${settings.currency})`}
+                    </span>
+                    <span className="text-[10px] text-amber-600 font-bold bg-amber-100 px-2 py-0.5 rounded-md">
+                      {isAr ? "يخصم من الأتعاب" : "Deducted"}
+                    </span>
                   </label>
                   <input
                     type="number"
                     min="0"
-                    placeholder="مثال: 15000 (رسوم مستحقة على الوكالة)"
+                    placeholder="15000"
                     value={agencyLiability}
                     onChange={e => setAgencyLiability(e.target.value)}
                     className="w-full p-3.5 bg-amber-50/40 border border-amber-200 rounded-2xl text-base font-black text-amber-900 outline-none focus:ring-2 focus:ring-amber-500"
@@ -525,7 +645,9 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
 
               {Number(totalFees) > 0 && (
                 <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200 flex items-center justify-between text-xs">
-                  <span className="font-bold text-stone-600">صافي الأتعاب بعد خصم مستحقات الوكالة:</span>
+                  <span className="font-bold text-stone-600">
+                    {isAr ? "صافي الأتعاب بعد خصم مستحقات الوكالة:" : "Net Fees after Agency Deductions:"}
+                  </span>
                   <span className="font-black text-sm text-[#172a46]">
                     {(Number(totalFees || 0) - Number(agencyLiability || 0)).toLocaleString()} {settings.currency}
                   </span>
@@ -541,17 +663,25 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                     onChange={e => setHasInitialPayment(e.target.checked)}
                     className="w-4 h-4 rounded text-[#c9a84c] focus:ring-[#c9a84c]"
                   />
-                  <span className="font-black text-sm text-[#172a46]">تسجيل دفعة مقدمة الآن وإصدار سند قبض فوري</span>
+                  <span className="font-black text-sm text-[#172a46]">
+                    {isAr
+                      ? "تسجيل دفعة مقدمة الآن وإصدار سند قبض فوري"
+                      : "Record initial down-payment & issue receipt voucher now"}
+                  </span>
                 </label>
 
                 {hasInitialPayment && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 animate-in fade-in">
                     <div>
-                      <label className="block text-[11px] font-bold text-stone-600 mb-1">مبلغ الدفعة المقدمة ({settings.currency})</label>
+                      <label className="block text-[11px] font-bold text-stone-600 mb-1">
+                        {isAr
+                          ? `مبلغ الدفعة المقدمة (${settings.currency})`
+                          : `Down-payment Amount (${settings.currency})`}
+                      </label>
                       <input
                         type="number"
                         min="1"
-                        placeholder="مثال: 40000"
+                        placeholder="40000"
                         value={initialPaymentAmount}
                         onChange={e => setInitialPaymentAmount(e.target.value)}
                         className="w-full p-2.5 bg-white border border-stone-200 rounded-2xl font-bold text-stone-800"
@@ -559,15 +689,17 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-bold text-stone-600 mb-1">طريقة السداد</label>
+                      <label className="block text-[11px] font-bold text-stone-600 mb-1">
+                        {isAr ? "طريقة السداد" : "Payment Method"}
+                      </label>
                       <select
                         value={initialPaymentMethod}
                         onChange={e => setInitialPaymentMethod(e.target.value as any)}
                         className="w-full p-2.5 bg-white border border-stone-200 rounded-2xl font-bold text-stone-800"
                       >
-                        <option value="تحويل بنكي">تحويل بنكي</option>
-                        <option value="كاش">كاش (نقداً)</option>
-                        <option value="شيك">شيك</option>
+                        <option value="تحويل بنكي">{isAr ? "تحويل بنكي" : "Bank Transfer"}</option>
+                        <option value="كاش">{isAr ? "كاش (نقداً)" : "Cash"}</option>
+                        <option value="شيك">{isAr ? "شيك" : "Cheque"}</option>
                       </select>
                     </div>
                   </div>
@@ -576,7 +708,9 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
 
               {/* Summary recap note */}
               <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 text-[11px] leading-relaxed">
-                سيتم إدراج المرشح تلقائياً في مرحلة <strong>(مسجل جديد)</strong>، مع إنشاء السجل المالي وسجل المراحل، ويمكنك متابعة وتحديث الإجراءات وإصدار سندات القبض في أي وقت.
+                {isAr
+                  ? "سيتم إدراج المرشح تلقائياً في مرحلة (مسجل جديد)، مع إنشاء السجل المالي وسجل المراحل، ويمكنك متابعة وتحديث الإجراءات وإصدار سندات القبض في أي وقت."
+                  : "The candidate will be placed in (New Registration) stage. Financial and milestone records will be created automatically, and receipts can be issued anytime."}
               </div>
             </div>
           )}
@@ -589,8 +723,8 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
               onClick={() => setStep((step - 1) as any)}
               className="px-5 py-2.5 rounded-2xl border border-stone-200 text-xs font-black text-stone-700 hover:bg-white transition-colors flex items-center gap-1"
             >
-              <ChevronRight className="w-4 h-4" />
-              السابق
+              {isAr ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+              {isAr ? "السابق" : "Previous"}
             </button>
           ) : (
             <div />
@@ -600,19 +734,19 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
             <button
               onClick={() => {
                 if (step === 1 && (!firstName.trim() || !lastName.trim() || !phone.trim())) {
-                  alert("يرجى إدخال الاسم ورقم الهاتف للمتابعة.");
+                  alert(isAr ? "يرجى إدخال الاسم ورقم الهاتف للمتابعة." : "Please enter name and phone number to proceed.");
                   return;
                 }
                 if (step === 2 && (!job.trim() || !country.trim())) {
-                  alert("يرجى إدخال المهنة والوجهة للمتابعة.");
+                  alert(isAr ? "يرجى إدخال المهنة والوجهة للمتابعة." : "Please enter job and destination country to proceed.");
                   return;
                 }
                 setStep((step + 1) as any);
               }}
               className="px-6 py-2.5 rounded-2xl bg-[#172a46] hover:bg-[#233d64] text-white text-xs font-black flex items-center gap-1.5 transition-transform active:scale-95 shadow-md"
             >
-              <span>التالي</span>
-              <ChevronLeft className="w-4 h-4" />
+              <span>{isAr ? "التالي" : "Next"}</span>
+              {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
             </button>
           ) : (
             <button
@@ -620,7 +754,7 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
               className="px-7 py-2.5 rounded-2xl bg-[#c9a84c] hover:bg-[#d8b759] text-[#172a46] text-xs font-black flex items-center gap-1.5 transition-transform active:scale-95 shadow-md"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>إتمام وحفظ المرشح</span>
+              <span>{isAr ? "إتمام وحفظ المرشح" : "Save & Finish"}</span>
             </button>
           )}
         </div>

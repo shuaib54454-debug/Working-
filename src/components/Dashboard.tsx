@@ -175,7 +175,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {onOpenPassportScanner && (
                 <button
                   onClick={onOpenPassportScanner}

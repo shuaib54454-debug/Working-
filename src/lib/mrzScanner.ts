@@ -237,6 +237,18 @@ export interface GenerateMRZParams {
   country?: string;
 }
 
+function transliterateArabicToLatin(text: string): string {
+  if (!text) return "";
+  const map: Record<string, string> = {
+    'ا': 'A', 'أ': 'A', 'إ': 'E', 'آ': 'A', 'ب': 'B', 'ت': 'T', 'ث': 'TH',
+    'ج': 'J', 'ح': 'H', 'خ': 'KH', 'د': 'D', 'ذ': 'DH', 'ر': 'R', 'ز': 'Z',
+    'س': 'S', 'ش': 'SH', 'ص': 'S', 'ض': 'D', 'ط': 'T', 'ظ': 'Z', 'ع': 'A',
+    'غ': 'GH', 'ف': 'F', 'ق': 'Q', 'ك': 'K', 'ل': 'L', 'م': 'M', 'ن': 'N',
+    'ه': 'H', 'و': 'W', 'ي': 'Y', 'ى': 'A', 'ئ': 'Y', 'ء': 'A', 'ة': 'A'
+  };
+  return text.split('').map(c => map[c] || c).join('');
+}
+
 /**
  * Synthesizes 100% ICAO Doc 9303 compliant TD3 MRZ lines (2 x 44 chars) with mathematical check digits
  */
@@ -244,20 +256,22 @@ export function generateTD3MRZFromVisual(params: GenerateMRZParams): { line1: st
   const countryCode = findCountryCode(params.country);
 
   // Line 1: P< + Country + SURNAME<<GIVEN<NAMES
-  let surname = (params.lastName || "")
+  let rawSurname = transliterateArabicToLatin(params.lastName || "");
+  let surname = rawSurname
     .toUpperCase()
     .replace(/[^A-Z]/g, " ")
     .trim()
     .replace(/\s+/g, "<");
 
-  let givenNames = (params.firstName || "")
+  let rawGiven = transliterateArabicToLatin(params.firstName || "");
+  let givenNames = rawGiven
     .toUpperCase()
     .replace(/[^A-Z]/g, " ")
     .trim()
     .replace(/\s+/g, "<");
 
   if (!surname && !givenNames && params.fullName) {
-    const parts = params.fullName
+    const parts = transliterateArabicToLatin(params.fullName)
       .toUpperCase()
       .replace(/[^A-Z\s]/g, "")
       .trim()
@@ -287,6 +301,24 @@ export function generateTD3MRZFromVisual(params: GenerateMRZParams): { line1: st
 
   const formatDateToYYMMDD = (dStr?: string, defaultYY = "90") => {
     if (!dStr) return `${defaultYY}0101`;
+    // If format is YYYY-MM-DD or DD/MM/YYYY, normalize first
+    const parts = dStr.trim().split(/[-/.]/);
+    if (parts.length === 3) {
+      // If first part is 4 digits (YYYY-MM-DD)
+      if (parts[0].length === 4) {
+        const yy = parts[0].slice(2);
+        const mm = parts[1].padStart(2, "0");
+        const dd = parts[2].padStart(2, "0");
+        return `${yy}${mm}${dd}`;
+      }
+      // If last part is 4 digits (DD-MM-YYYY)
+      if (parts[2].length === 4) {
+        const yy = parts[2].slice(2);
+        const mm = parts[1].padStart(2, "0");
+        const dd = parts[0].padStart(2, "0");
+        return `${yy}${mm}${dd}`;
+      }
+    }
     const clean = dStr.replace(/[^0-9]/g, "");
     if (clean.length === 6) return clean;
     if (clean.length === 8) return clean.slice(2);

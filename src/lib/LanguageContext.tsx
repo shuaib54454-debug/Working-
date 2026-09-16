@@ -16,11 +16,14 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [language, setLanguageState] = useState<Language>(() => {
     try {
       const saved = localStorage.getItem("rec_language") as Language;
-      if (saved === "ar" || saved === "en") return saved;
+      if (saved === "en") return "en";
+      // When 100% English is requested, default to 'en'
+      localStorage.setItem("rec_language", "en");
+      return "en";
     } catch (e) {
       console.warn("Error reading language from localStorage", e);
     }
-    return "ar";
+    return "en";
   });
 
   const setLanguage = (lang: Language) => {
@@ -56,7 +59,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         isAr
       }}
     >
-      <div dir={dir} className={isAr ? "font-cairo" : "font-sans"}>
+      <div dir={dir} className={`w-full min-h-screen overflow-x-hidden ${isAr ? "font-cairo" : "font-sans"}`}>
         {children}
       </div>
     </LanguageContext.Provider>

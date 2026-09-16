@@ -131,6 +131,7 @@ export interface Candidate {
   expenses: CandidateExpense[];
   registrationDate: string;
   archived: boolean;
+  updatedAt?: string;
   notes?: string;
   noteEntries?: CandidateNoteEntry[];
   agentName?: string; // اسم الوسيط / المندوب

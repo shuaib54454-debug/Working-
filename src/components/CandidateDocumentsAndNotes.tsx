@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Candidate, CandidateNoteEntry } from "../types";
 import { WorkerStorageFolder } from "../lib/firebase";
+import { useLanguage } from "../lib/LanguageContext";
 
 interface CandidateDocumentsAndNotesProps {
   candidate: Candidate;
@@ -58,6 +59,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
   copiedDocId,
   handleCopyDocId
 }) => {
+  const { isAr } = useLanguage();
   const [showAddOtherDocModal, setShowAddOtherDocModal] = useState(false);
   const [otherDocTitle, setOtherDocTitle] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
@@ -70,7 +72,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
     onUpdate(candidate.id, { notes: candidate.notes || "" });
     setTimeout(() => {
       setNotesSaving(false);
-      const timeStr = new Date().toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
+      const timeStr = new Date().toLocaleTimeString(isAr ? "ar-SA" : "en-US", { hour: "2-digit", minute: "2-digit" });
       setNotesSavedTime(timeStr);
     }, 350);
   };
@@ -80,11 +82,13 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
     if (!quickNoteText.trim()) return;
 
     const now = new Date();
-    const dateStr = now.toLocaleDateString("ar-SA", { year: "numeric", month: "short", day: "numeric" });
-    const timeStr = now.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
+    const dateStr = now.toLocaleDateString(isAr ? "ar-SA" : "en-US", { year: "numeric", month: "short", day: "numeric" });
+    const timeStr = now.toLocaleTimeString(isAr ? "ar-SA" : "en-US", { hour: "2-digit", minute: "2-digit" });
     const noteId = `NOTE-${Date.now().toString(36).toUpperCase()}`;
 
-    const docTag = selectedDocIdForNote ? ` [مرتبط بالوثيقة: ${selectedDocIdForNote}]` : "";
+    const docTag = selectedDocIdForNote
+      ? (isAr ? ` [مرتبط بالوثيقة: ${selectedDocIdForNote}]` : ` [Linked to doc: ${selectedDocIdForNote}]`)
+      : "";
     const newLine = `• [${dateStr} ${timeStr}] ${quickNoteText.trim()}${docTag}`;
 
     const updatedNotes = candidate.notes?.trim()
@@ -113,8 +117,10 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
   const coreDocs = [
     {
       folder: "passport" as WorkerStorageFolder,
-      title: "صورة جواز السفر",
-      description: "وثيقة السفر الرسمية لبيانات المرشح وتأكيد الهوية وتاريخ الصلاحية.",
+      title: isAr ? "صورة جواز السفر" : "Passport Copy",
+      description: isAr
+        ? "وثيقة السفر الرسمية لبيانات المرشح وتأكيد الهوية وتاريخ الصلاحية."
+        : "Official travel passport copy for identity verification and validity check.",
       url: candidate.passportImageUrl,
       storagePath: candidate.passportStoragePath,
       docId: candidate.passportDocId || (candidate.passportImageUrl ? `DOC-${cleanCandidateId}-PASSPORT` : null),
@@ -123,8 +129,10 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
     },
     {
       folder: "photo" as WorkerStorageFolder,
-      title: "الصورة الشخصية الرسمية",
-      description: "صورة حديثة بخلفية بيضاء للاستخدام في السيرة الذاتية والمعاملات الحكومية.",
+      title: isAr ? "الصورة الشخصية الرسمية" : "Official Personal Photo",
+      description: isAr
+        ? "صورة حديثة بخلفية بيضاء للاستخدام في السيرة الذاتية والمعاملات الحكومية."
+        : "Recent photo with white background for CV and official procedures.",
       url: candidate.photoUrl,
       storagePath: candidate.photoStoragePath,
       docId: candidate.photoDocId || (candidate.photoUrl ? `DOC-${cleanCandidateId}-PHOTO` : null),
@@ -133,8 +141,10 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
     },
     {
       folder: "contract" as WorkerStorageFolder,
-      title: "عقد العمل والاتفاقية",
-      description: "نسخة عقد العمل المعتمدة الموقعة بين صاحب العمل والمرشح والمكتب.",
+      title: isAr ? "عقد العمل والاتفاقية" : "Employment Contract",
+      description: isAr
+        ? "نسخة عقد العمل المعتمدة الموقعة بين صاحب العمل والمرشح والمكتب."
+        : "Signed approved employment contract between employer and candidate.",
       url: candidate.contractUrl,
       storagePath: candidate.contractStoragePath,
       docId: candidate.contractDocId || (candidate.contractUrl ? `DOC-${cleanCandidateId}-CONTRACT` : null),
@@ -143,8 +153,10 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
     },
     {
       folder: "medical" as WorkerStorageFolder,
-      title: "التقرير الطبي المعتمد",
-      description: "شهادة الكشف الطبي الصادرة من المراكز المعتمدة (وافق / لائق طبياً).",
+      title: isAr ? "التقرير الطبي المعتمد" : "Approved Medical Report",
+      description: isAr
+        ? "شهادة الكشف الطبي الصادرة من المراكز المعتمدة (وافق / لائق طبياً)."
+        : "Medical examination fitness certificate issued by accredited centers.",
       url: candidate.medicalUrl,
       storagePath: candidate.medicalStoragePath,
       docId: candidate.medicalDocId || (candidate.medicalUrl ? `DOC-${cleanCandidateId}-MEDICAL` : null),
@@ -153,8 +165,10 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
     },
     {
       folder: "coc" as WorkerStorageFolder,
-      title: "شهادة الكفاءة المهنية (COC)",
-      description: "شهادة اجتياز الفحص المهني والتدريب العملي للمهن التخصصية المعتمدة.",
+      title: isAr ? "شهادة الكفاءة المهنية (COC)" : "Competency Certificate (COC)",
+      description: isAr
+        ? "شهادة اجتياز الفحص المهني والتدريب العملي للمهن التخصصية المعتمدة."
+        : "Professional competency & skill assessment certificate for certified trades.",
       url: candidate.cocImageUrl,
       storagePath: candidate.cocStoragePath,
       docId: candidate.cocDocId || (candidate.cocImageUrl ? `DOC-${cleanCandidateId}-COC` : null),
@@ -163,8 +177,10 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
     },
     {
       folder: "visa" as WorkerStorageFolder,
-      title: "تأشيرة الدخول (الفيزا)",
-      description: "صورة التأشيرة الصادرة من منصة مساند أو وزارة الموارد البشرية.",
+      title: isAr ? "تأشيرة الدخول (الفيزا)" : "Entry Visa",
+      description: isAr
+        ? "صورة التأشيرة الصادرة من منصة مساند أو وزارة الموارد البشرية."
+        : "Visa issued from Musaned or the Ministry of Human Resources.",
       url: candidate.visaUrl,
       storagePath: candidate.visaStoragePath,
       docId: candidate.visaDocId || (candidate.visaUrl ? `DOC-${cleanCandidateId}-VISA` : null),
@@ -184,16 +200,18 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
           <div>
             <h3 id="candidate-documents-heading" className="font-black text-sm sm:text-base text-[#172a46] flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-[#c9a84c]" />
-              <span>أرشيف وثائق المرشح ومعرّفات الأرشفة (Document IDs)</span>
+              <span>{isAr ? "أرشيف وثائق المرشح ومعرّفات الأرشفة (Document IDs)" : "Candidate Document Archive & IDs"}</span>
             </h3>
             <p className="text-[11px] text-stone-400 mt-0.5">
-              يتم إصدار معرّف رقمي فريد (ID) لكل وثيقة مرفوعة لتوثيق وتتبع المعاملات الإدارية بدقة.
+              {isAr
+                ? "يتم إصدار معرّف رقمي فريد (ID) لكل وثيقة مرفوعة لتوثيق وتتبع المعاملات الإدارية بدقة."
+                : "A unique digital ID is issued for each archived document for rigorous traceability."}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             <span id="doc-completion-badge" className="text-[11px] font-bold bg-[#172a46]/5 text-[#172a46] px-2.5 py-1 rounded-xl border border-[#172a46]/10">
-              {uploadedCount} من 6 وثائق أساسية
+              {isAr ? `${uploadedCount} من 6 وثائق أساسية` : `${uploadedCount} of 6 core documents`}
             </span>
             <span id="candidate-storage-path-badge" className="text-[10px] sm:text-[11px] font-mono font-bold bg-stone-100 text-stone-600 px-2.5 py-1 rounded-xl border border-stone-200" dir="ltr">
               workers/{candidate.id}/
@@ -205,7 +223,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
               className="px-3 py-1.5 bg-[#172a46] hover:bg-[#203a60] text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-colors shadow-2xs"
             >
               <FilePlus className="w-3.5 h-3.5 text-[#c9a84c]" />
-              <span>إضافة وثيقة أخرى</span>
+              <span>{isAr ? "إضافة وثيقة أخرى" : "Add Other Document"}</span>
             </button>
           </div>
         </div>
@@ -248,14 +266,15 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
                       </div>
                       <span className="text-xs font-black text-stone-800 truncate">{doc.title}</span>
                     </div>
+
                     {isUploaded ? (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 flex items-center gap-1 shrink-0">
                         <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                        <span>مرفوع</span>
+                        <span>{isAr ? "مرفوع" : "Uploaded"}</span>
                       </span>
                     ) : (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-stone-200/80 text-stone-600 shrink-0">
-                        غير متوفر
+                        {isAr ? "غير متوفر" : "Missing"}
                       </span>
                     )}
                   </div>
@@ -267,7 +286,9 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
                       className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 bg-amber-50/70 border border-amber-200/70 rounded-xl text-[11px]"
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-[10px] font-bold text-amber-800 shrink-0">معرّف الوثيقة:</span>
+                        <span className="text-[10px] font-bold text-amber-800 shrink-0">
+                          {isAr ? "معرّف الوثيقة:" : "Doc ID:"}
+                        </span>
                         <span
                           id={`doc-id-text-${doc.folder}`}
                           className="font-mono font-bold text-[#172a46] text-[10px] truncate select-all"
@@ -281,24 +302,26 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
                         type="button"
                         onClick={(e) => handleCopyDocId(doc.docId!, e)}
                         className="shrink-0 px-1.5 py-0.5 rounded-lg bg-white hover:bg-amber-100 text-amber-900 transition-colors border border-amber-200 flex items-center gap-1 text-[10px] font-bold"
-                        title="نسخ معرّف الوثيقة"
+                        title={isAr ? "نسخ معرّف الوثيقة" : "Copy Document ID"}
                       >
                         {copiedDocId === doc.docId ? (
                           <>
                             <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />
-                            <span className="text-emerald-700">تم النسخ</span>
+                            <span className="text-emerald-700">{isAr ? "تم النسخ" : "Copied"}</span>
                           </>
                         ) : (
                           <>
                             <Copy className="w-3 h-3 text-stone-500" />
-                            <span>نسخ</span>
+                            <span>{isAr ? "نسخ" : "Copy"}</span>
                           </>
                         )}
                       </button>
                     </div>
                   ) : (
                     <div className="text-[10px] text-stone-400 italic px-1">
-                      سيتم توليد معرّف فريد للوثيقة (DOC-ID) فور رفع الملف
+                      {isAr
+                        ? "سيتم توليد معرّف فريد للوثيقة (DOC-ID) فور رفع الملف"
+                        : "A unique DOC-ID will be generated automatically upon upload"}
                     </div>
                   )}
 
@@ -313,7 +336,13 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
                     ) : (
                       <Upload className="w-3.5 h-3.5 text-[#c9a84c]" />
                     )}
-                    <span>{isUploading ? "جاري الحفظ..." : isUploaded ? "استبدال الملف" : "رفع الملف"}</span>
+                    <span>
+                      {isUploading
+                        ? (isAr ? "جاري الحفظ..." : "Uploading...")
+                        : isUploaded
+                        ? (isAr ? "استبدال الملف" : "Replace File")
+                        : (isAr ? "رفع الملف" : "Upload File")}
+                    </span>
                     <input
                       id={`file-input-${doc.folder}`}
                       type="file"
@@ -339,17 +368,17 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
                           })
                         }
                         className="px-2.5 py-1.5 bg-[#172a46] text-white hover:bg-[#203a60] rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
-                        title="معاينة الوثيقة"
+                        title={isAr ? "معاينة الوثيقة" : "Preview Document"}
                       >
                         <Eye className="w-3.5 h-3.5 text-[#c9a84c]" />
-                        <span>معاينة</span>
+                        <span>{isAr ? "معاينة" : "Preview"}</span>
                       </button>
                       <button
                         id={`btn-delete-doc-${doc.folder}`}
                         type="button"
                         onClick={() => handleDeleteDocument(doc.folder, doc.docId || undefined)}
                         className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-xl transition-colors"
-                        title="حذف الوثيقة"
+                        title={isAr ? "حذف الوثيقة" : "Delete Document"}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -366,7 +395,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
           <div className="flex items-center justify-between mb-3">
             <h4 className="font-bold text-xs sm:text-sm text-stone-700 flex items-center gap-1.5">
               <FileText className="w-4 h-4 text-stone-400" />
-              <span>وثائق ومرفقات إضافية أخرى</span>
+              <span>{isAr ? "وثائق ومرفقات إضافية أخرى" : "Additional Supporting Documents"}</span>
               {additionalDocs.length > 0 && (
                 <span className="px-2 py-0.5 bg-stone-100 text-stone-600 rounded-full text-[10px] font-bold">
                   {additionalDocs.length}
@@ -396,7 +425,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
                         type="button"
                         onClick={(e) => handleCopyDocId(otherDoc.id, e)}
                         className="p-0.5 text-stone-400 hover:text-stone-700 transition-colors"
-                        title="نسخ المعرف"
+                        title={isAr ? "نسخ المعرف" : "Copy ID"}
                       >
                         {copiedDocId === otherDoc.id ? (
                           <Check className="w-3 h-3 text-emerald-600" />
@@ -407,7 +436,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
                     </div>
                     {otherDoc.uploadedAt && (
                       <div className="text-[10px] text-stone-400">
-                        تاريخ الرفع: {new Date(otherDoc.uploadedAt).toLocaleDateString("ar-SA")}
+                        {isAr ? "تاريخ الرفع:" : "Uploaded:"} {new Date(otherDoc.uploadedAt).toLocaleDateString(isAr ? "ar-SA" : "en-US")}
                       </div>
                     )}
                   </div>
@@ -428,13 +457,13 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
                       className="px-2.5 py-1.5 bg-[#172a46] text-white hover:bg-[#203a60] rounded-xl text-xs font-bold flex items-center gap-1"
                     >
                       <Eye className="w-3.5 h-3.5 text-[#c9a84c]" />
-                      <span>معاينة</span>
+                      <span>{isAr ? "معاينة" : "Preview"}</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteDocument("documents", otherDoc.id)}
                       className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-xl"
-                      title="حذف الوثيقة"
+                      title={isAr ? "حذف الوثيقة" : "Delete Document"}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -444,7 +473,9 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
             </div>
           ) : (
             <div className="p-4 rounded-2xl border border-dashed border-stone-200 text-center text-xs text-stone-400">
-              لا توجد وثائق إضافية مرفوعة بعد. يمكنك النقر على &quot;إضافة وثيقة أخرى&quot; بالأعلى لرفع شهادات أو تفويضات بمعرفات مخصصة.
+              {isAr
+                ? "لا توجد وثائق إضافية مرفوعة بعد. يمكنك النقر على \"إضافة وثيقة أخرى\" بالأعلى لرفع شهادات أو تفويضات بمعرفات مخصصة."
+                : "No additional documents uploaded yet. Click \"Add Other Document\" above to attach custom certificates or power of attorney."}
             </div>
           )}
         </div>
@@ -456,19 +487,19 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
           <div className="flex items-center gap-2">
             <FileText className="w-5 h-5 text-[#c9a84c]" />
             <h3 id="candidate-notes-title" className="font-black text-sm text-[#172a46]">
-              الملاحظات وسجل المتابعة الإدارية
+              {isAr ? "الملاحظات وسجل المتابعة الإدارية" : "Administrative Notes & Tracking Log"}
             </h3>
           </div>
           <div id="candidate-notes-save-status" className="flex items-center gap-2">
             {notesSaving ? (
               <span className="px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[10px] font-bold flex items-center gap-1">
                 <Loader2 className="w-3 h-3 animate-spin text-amber-600" />
-                <span>جاري الحفظ بالسحابة...</span>
+                <span>{isAr ? "جاري الحفظ بالسحابة..." : "Saving to cloud..."}</span>
               </span>
             ) : (
               <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[10px] font-bold flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>تم الحفظ في السحابة {notesSavedTime ? `• ${notesSavedTime}` : ""}</span>
+                <span>{isAr ? "تم الحفظ في السحابة" : "Saved to cloud"} {notesSavedTime ? `• ${notesSavedTime}` : ""}</span>
               </span>
             )}
           </div>
@@ -482,7 +513,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
         >
           <div className="flex items-center gap-2 text-xs font-bold text-stone-700">
             <Sparkles className="w-4 h-4 text-[#c9a84c]" />
-            <span>إضافة إجراء إداري أو ملحوظة مؤرخة سريعة:</span>
+            <span>{isAr ? "إضافة إجراء إداري أو ملحوظة مؤرخة سريعة:" : "Add Timestamped Administrative Quick Note:"}</span>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
             <input
@@ -490,7 +521,11 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
               type="text"
               value={quickNoteText}
               onChange={e => setQuickNoteText(e.target.value)}
-              placeholder="مثال: تم تسليم الجواز للقنصلية، أو صدور نتيجة الفحص الطبي..."
+              placeholder={
+                isAr
+                  ? "مثال: تم تسليم الجواز للقنصلية، أو صدور نتيجة الفحص الطبي..."
+                  : "e.g., Passport submitted to embassy, medical report received..."
+              }
               className="flex-1 p-2.5 bg-white border border-stone-200 rounded-xl text-xs font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
             />
 
@@ -501,40 +536,40 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
               onChange={e => setSelectedDocIdForNote(e.target.value)}
               className="p-2.5 bg-white border border-stone-200 rounded-xl text-[11px] font-bold text-stone-700 outline-none focus:ring-2 focus:ring-[#c9a84c]"
             >
-              <option value="">بدون ربط بوثيقة</option>
+              <option value="">{isAr ? "بدون ربط بوثيقة" : "No Document Link"}</option>
               {candidate.passportImageUrl && (
                 <option value={candidate.passportDocId || `DOC-${cleanCandidateId}-PASSPORT`}>
-                  ربط بجواز السفر ({candidate.passportDocId || "جواز السفر"})
+                  {isAr ? "ربط بجواز السفر" : "Link Passport"} ({candidate.passportDocId || "Passport"})
                 </option>
               )}
               {candidate.photoUrl && (
                 <option value={candidate.photoDocId || `DOC-${cleanCandidateId}-PHOTO`}>
-                  ربط بالصورة الشخصية ({candidate.photoDocId || "الصورة"})
+                  {isAr ? "ربط بالصورة الشخصية" : "Link Photo"} ({candidate.photoDocId || "Photo"})
                 </option>
               )}
               {candidate.contractUrl && (
                 <option value={candidate.contractDocId || `DOC-${cleanCandidateId}-CONTRACT`}>
-                  ربط بعقد العمل ({candidate.contractDocId || "عقد العمل"})
+                  {isAr ? "ربط بعقد العمل" : "Link Contract"} ({candidate.contractDocId || "Contract"})
                 </option>
               )}
               {candidate.medicalUrl && (
                 <option value={candidate.medicalDocId || `DOC-${cleanCandidateId}-MEDICAL`}>
-                  ربط بالتقرير الطبي ({candidate.medicalDocId || "التقرير الطبي"})
+                  {isAr ? "ربط بالتقرير الطبي" : "Link Medical"} ({candidate.medicalDocId || "Medical"})
                 </option>
               )}
               {candidate.cocImageUrl && (
                 <option value={candidate.cocDocId || `DOC-${cleanCandidateId}-COC`}>
-                  ربط بشهادة COC ({candidate.cocDocId || "COC"})
+                  {isAr ? "ربط بشهادة COC" : "Link COC"} ({candidate.cocDocId || "COC"})
                 </option>
               )}
               {candidate.visaUrl && (
                 <option value={candidate.visaDocId || `DOC-${cleanCandidateId}-VISA`}>
-                  ربط بالتأشيرة ({candidate.visaDocId || "التأشيرة"})
+                  {isAr ? "ربط بالتأشيرة" : "Link Visa"} ({candidate.visaDocId || "Visa"})
                 </option>
               )}
               {additionalDocs.map(d => (
                 <option key={d.id} value={d.id}>
-                  ربط بـ: {d.title} ({d.id})
+                  {isAr ? "ربط بـ:" : "Link:"} {d.title} ({d.id})
                 </option>
               ))}
             </select>
@@ -545,20 +580,29 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
               disabled={!quickNoteText.trim()}
               className="px-4 py-2.5 bg-[#172a46] hover:bg-[#203a60] disabled:bg-stone-300 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black shrink-0 transition-colors shadow-2xs"
             >
-              إضافة للملاحظات
+              {isAr ? "إضافة للملاحظات" : "Add Note"}
             </button>
           </div>
 
           {/* Quick Preset Tags for common updates */}
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            <span className="text-[10px] text-stone-400 font-bold">عبارات شائعة:</span>
-            {[
-              "تم تسليم الجواز للقنصلية",
-              "صدور نتيجة الفحص الطبي: لائق",
-              "تم توثيق العقد عبر مساند",
-              "بانتظار موافقة الكفيل المبدئية",
-              "تم حجز موعد المقابلة"
-            ].map((preset, idx) => (
+            <span className="text-[10px] text-stone-400 font-bold">{isAr ? "عبارات شائعة:" : "Quick presets:"}</span>
+            {(isAr
+              ? [
+                  "تم تسليم الجواز للقنصلية",
+                  "صدور نتيجة الفحص الطبي: لائق",
+                  "تم توثيق العقد عبر مساند",
+                  "بانتظار موافقة الكفيل المبدئية",
+                  "تم حجز موعد المقابلة"
+                ]
+              : [
+                  "Passport submitted to embassy",
+                  "Medical test cleared: Fit",
+                  "Contract certified on Musaned",
+                  "Awaiting sponsor confirmation",
+                  "Interview scheduled"
+                ]
+            ).map((preset, idx) => (
               <button
                 key={idx}
                 type="button"
@@ -574,7 +618,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
         {/* Main Editable Notes Area */}
         <div className="space-y-2">
           <label htmlFor="candidate-notes-textarea" className="block text-xs font-bold text-stone-600">
-            النص الكامل للملاحظات والتفاصيل الخاصة بالمرشح:
+            {isAr ? "النص الكامل للملاحظات والتفاصيل الخاصة بالمرشح:" : "Full candidate notes and remarks:"}
           </label>
           <textarea
             id="candidate-notes-textarea"
@@ -582,17 +626,23 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
             value={candidate.notes || ""}
             onChange={e => {
               onUpdate(candidate.id, { notes: e.target.value });
-              const timeStr = new Date().toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
+              const timeStr = new Date().toLocaleTimeString(isAr ? "ar-SA" : "en-US", { hour: "2-digit", minute: "2-digit" });
               setNotesSavedTime(timeStr);
             }}
             className="w-full p-4 bg-stone-50 border border-stone-200 rounded-2xl text-xs font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c] leading-relaxed"
-            placeholder="اكتب هنا أي تفاصيل خاصة بالمرشح، تفضيلات الكفيل، أو أي متطلبات خاصة بالاستقدام..."
+            placeholder={
+              isAr
+                ? "اكتب هنا أي تفاصيل خاصة بالمرشح، تفضيلات الكفيل، أو أي متطلبات خاصة بالاستقدام..."
+                : "Enter candidate specific requirements, employer notes, or deployment conditions..."
+            }
           />
         </div>
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
           <span className="text-[11px] text-stone-400">
-            عدد الأحرف: {(candidate.notes || "").length} | يحفظ التغييرات تلقائياً في السجل
+            {isAr
+              ? `عدد الأحرف: ${(candidate.notes || "").length} | يحفظ التغييرات تلقائياً في السجل`
+              : `Character count: ${(candidate.notes || "").length} | Automatically synced`}
           </span>
           <button
             id="btn-manual-save-notes"
@@ -601,7 +651,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
             className="px-4 py-2 bg-[#172a46] hover:bg-[#203a60] text-white rounded-xl text-xs font-black transition-colors self-end shadow-xs flex items-center gap-1.5"
           >
             <Check className="w-3.5 h-3.5 text-emerald-400" />
-            <span>تأكيد حفظ الملاحظات</span>
+            <span>{isAr ? "تأكيد حفظ الملاحظات" : "Save Notes"}</span>
           </button>
         </div>
       </div>
@@ -613,7 +663,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
             <div className="flex items-center justify-between border-b pb-3">
               <h3 className="font-black text-sm text-[#172a46] flex items-center gap-2">
                 <FilePlus className="w-4 h-4 text-[#c9a84c]" />
-                <span>أرشفة وثيقة أو مرفق إضافي</span>
+                <span>{isAr ? "أرشفة وثيقة أو مرفق إضافي" : "Archive Additional Document"}</span>
               </h3>
               <button
                 type="button"
@@ -629,25 +679,33 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-stone-600 font-bold mb-1">عنوان أو نوع الوثيقة *</label>
+                <label className="block text-stone-600 font-bold mb-1">
+                  {isAr ? "عنوان أو نوع الوثيقة *" : "Document Title / Type *"}
+                </label>
                 <input
                   type="text"
                   required
                   value={otherDocTitle}
                   onChange={e => setOtherDocTitle(e.target.value)}
-                  placeholder="مثال: شهادة خلو سوابق، تفويض مساند، مؤهل علمي"
+                  placeholder={
+                    isAr
+                      ? "مثال: شهادة خلو سوابق، تفويض مساند، مؤهل علمي"
+                      : "e.g., Police clearance, Musaned authorization, Academic certificate"
+                  }
                   className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
                 />
               </div>
 
               <div>
-                <label className="block text-stone-600 font-bold mb-1">الملف (صورة أو PDF حتى 3MB) *</label>
+                <label className="block text-stone-600 font-bold mb-1">
+                  {isAr ? "الملف (صورة أو PDF حتى 3MB) *" : "File (Image or PDF up to 3MB) *"}
+                </label>
                 <input
                   type="file"
                   accept="image/*,application/pdf"
                   disabled={uploadingFolder === "documents"}
                   onChange={e => {
-                    handleFileUpload("documents", e, otherDocTitle || "مرفق إضافي");
+                    handleFileUpload("documents", e, otherDocTitle || (isAr ? "مرفق إضافي" : "Additional Document"));
                     setShowAddOtherDocModal(false);
                     setOtherDocTitle("");
                   }}
@@ -665,7 +723,7 @@ export const CandidateDocumentsAndNotes: React.FC<CandidateDocumentsAndNotesProp
                 }}
                 className="px-4 py-2 text-stone-500 font-bold rounded-xl hover:bg-stone-100 text-xs"
               >
-                إغلاق
+                {isAr ? "إغلاق" : "Cancel"}
               </button>
             </div>
           </div>

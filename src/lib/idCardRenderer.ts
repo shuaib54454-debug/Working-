@@ -25,6 +25,7 @@ export interface IdCardRenderOptions {
   showDates?: boolean;
   showQrCode?: boolean;
   side?: "both" | "front" | "back";
+  isAr?: boolean;
 }
 
 /**
@@ -41,18 +42,28 @@ export function maskSensitiveValue(value?: string): string {
 /**
  * Render Medical Exam Status Badge with clear color and icon
  */
-function getMedicalExamBadgeHtml(status: string): string {
+function getMedicalExamBadgeHtml(status: string, isAr = true): string {
   const normalized = (status || "").trim();
-  if (normalized === "مكتمل" || normalized.includes("لائق")) {
+  if (
+    normalized === "مكتمل" ||
+    normalized.includes("لائق") ||
+    normalized.toLowerCase().includes("complete") ||
+    normalized.toLowerCase().includes("fit")
+  ) {
     return `
       <span class="cr80-badge cr80-badge-success">
         <svg class="cr80-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
           <polyline points="20 6 9 17 4 12"></polyline>
         </svg>
-        <span>مكتمل (لائق طبياً)</span>
+        <span>${isAr ? "مكتمل (لائق طبياً)" : "Completed (Fit)"}</span>
       </span>
     `;
-  } else if (normalized === "قيد المراجعة" || normalized.includes("بانتظار")) {
+  } else if (
+    normalized === "قيد المراجعة" ||
+    normalized.includes("بانتظار") ||
+    normalized.toLowerCase().includes("review") ||
+    normalized.toLowerCase().includes("pending")
+  ) {
     return `
       <span class="cr80-badge cr80-badge-warning">
         <svg class="cr80-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
@@ -60,7 +71,7 @@ function getMedicalExamBadgeHtml(status: string): string {
           <line x1="12" y1="8" x2="12" y2="12"></line>
           <line x1="12" y1="16" x2="12.01" y2="16"></line>
         </svg>
-        <span>قيد المراجعة</span>
+        <span>${isAr ? "قيد المراجعة" : "Under Review"}</span>
       </span>
     `;
   } else {
@@ -70,7 +81,7 @@ function getMedicalExamBadgeHtml(status: string): string {
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
-        <span>غير مكتمل</span>
+        <span>${isAr ? "غير مكتمل" : "Incomplete"}</span>
       </span>
     `;
   }
@@ -639,25 +650,30 @@ export function generateFrontCardHtml(
   data: CandidateIdCardData,
   options: IdCardRenderOptions = {}
 ): string {
+  const isAr = options.isAr !== false;
   const showOrg = options.showOrganization !== false;
   const showLogo = options.showLogo !== false;
   const showDates = options.showDates !== false;
 
-  const orgName = (showOrg && data.organizationName) ? data.organizationName : "المستشفى التخصصي للرعاية الصحية";
-  const jobTitle = data.jobTitle || "طبيب";
+  const orgName = (showOrg && data.organizationName)
+    ? data.organizationName
+    : isAr
+    ? "المستشفى التخصصي للرعاية الصحية"
+    : "Specialized Healthcare Center";
+  const jobTitle = data.jobTitle || (isAr ? "طبيب" : "Doctor");
   const photoSrc = data.photoUrl || "";
 
   return `
-    <div class="cr80-card cr80-card-front" id="cr80-card-front">
+    <div class="cr80-card cr80-card-front" id="cr80-card-front" style="direction: ${isAr ? "rtl" : "ltr"}; text-align: ${isAr ? "right" : "left"};">
       <div class="cr80-content">
         <!-- Header -->
         <div class="cr80-front-header">
           <div class="cr80-header-info">
             <span class="cr80-org-name">${orgName}</span>
             <div class="cr80-title-badge">
-              <span>بطاقة تعريف طبيب</span>
+              <span>${isAr ? "بطاقة تعريف مهنية" : "PROFESSIONAL ID"}</span>
               <span>•</span>
-              <span style="font-size: 1.8mm; color: #0284c7;">DOCTOR ID</span>
+              <span style="font-size: 1.8mm; color: #0284c7;">${isAr ? "DOCTOR ID" : "MEDICAL"}</span>
             </div>
           </div>
           ${
@@ -681,15 +697,15 @@ export function generateFrontCardHtml(
             }
           </div>
           <div class="cr80-doc-details">
-            <div class="cr80-doc-name" title="${data.fullName}">${data.fullName || "طبيب معتمد"}</div>
+            <div class="cr80-doc-name" title="${data.fullName}">${data.fullName || (isAr ? "طبيب معتمد" : "Certified Doctor")}</div>
             <div class="cr80-job-chip">
-              <svg style="width:2.2mm;height:2.2mm;margin-left:0.8mm;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <svg style="width:2.2mm;height:2.2mm;margin-${isAr ? "left" : "right"}:0.8mm;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
               </svg>
               <span>${jobTitle}</span>
             </div>
             <div class="cr80-field-row">
-              <span class="cr80-field-label">رقم التعريف:</span>
+              <span class="cr80-field-label">${isAr ? "رقم التعريف:" : "ID Number:"}</span>
               <span class="cr80-field-val">${data.idCardNumber || "DOC-0001"}</span>
             </div>
           </div>
@@ -700,8 +716,8 @@ export function generateFrontCardHtml(
           ${
             showDates
               ? `<div class="cr80-date-badge">
-                  <span>إصدار: <b>${data.issueDate || new Date().toISOString().slice(0, 10)}</b></span>
-                  <span>انتهاء: <b>${data.expiryDate || "2028-12-31"}</b></span>
+                  <span>${isAr ? "إصدار:" : "Issued:"} <b>${data.issueDate || new Date().toISOString().slice(0, 10)}</b></span>
+                  <span>${isAr ? "انتهاء:" : "Expires:"} <b>${data.expiryDate || "2028-12-31"}</b></span>
                 </div>`
               : `<div></div>`
           }
@@ -709,7 +725,7 @@ export function generateFrontCardHtml(
             <span class="cr80-sec-dot" style="background:#c9a84c;"></span>
             <span class="cr80-sec-dot" style="background:#0f766e;"></span>
             <span class="cr80-sec-dot" style="background:#0284c7;"></span>
-            <span style="font-size:1.6mm;font-weight:800;color:#94a3b8;margin-right:1mm;">VERIFIED</span>
+            <span style="font-size:1.6mm;font-weight:800;color:#94a3b8;margin-${isAr ? "right" : "left"}:1mm;">VERIFIED</span>
           </div>
         </div>
       </div>
@@ -724,16 +740,18 @@ export function generateBackCardHtml(
   data: CandidateIdCardData,
   options: IdCardRenderOptions = {}
 ): string {
+  const isAr = options.isAr !== false;
   const isMasked = !!options.maskSensitiveData;
   const showQr = options.showQrCode !== false;
 
+  const notAvailableStr = isAr ? "غير متوفر" : "N/A";
   const displayPassport = isMasked
     ? maskSensitiveValue(data.passportNumber)
-    : (data.passportNumber || "غير متوفر");
+    : (data.passportNumber || notAvailableStr);
 
   const displayCoc = isMasked
     ? maskSensitiveValue(data.cocNumber)
-    : (data.cocNumber || "غير متوفر");
+    : (data.cocNumber || notAvailableStr);
 
   const verificationPayload = JSON.stringify({
     id: data.idCardNumber,
@@ -743,11 +761,11 @@ export function generateBackCardHtml(
   });
 
   return `
-    <div class="cr80-card cr80-card-back" id="cr80-card-back">
+    <div class="cr80-card cr80-card-back" id="cr80-card-back" style="direction: ${isAr ? "rtl" : "ltr"}; text-align: ${isAr ? "right" : "left"};">
       <div class="cr80-content">
         <!-- Header -->
         <div class="cr80-back-header">
-          <span class="cr80-back-title">البيانات المهنية والأمنية المعتمدة</span>
+          <span class="cr80-back-title">${isAr ? "البيانات المهنية والأمنية المعتمدة" : "Certified Professional Credentials"}</span>
           <span class="cr80-back-id">${data.idCardNumber || "DOC-0001"}</span>
         </div>
 
@@ -761,7 +779,7 @@ export function generateBackCardHtml(
                 <line x1="7" y1="8" x2="17" y2="8"></line>
                 <line x1="7" y1="12" x2="13" y2="12"></line>
               </svg>
-              <span>رقم الجواز:</span>
+              <span>${isAr ? "رقم الجواز:" : "Passport No:"}</span>
             </span>
             <span class="cr80-grid-value">${displayPassport}</span>
           </div>
@@ -772,7 +790,7 @@ export function generateBackCardHtml(
               <svg style="width:2.2mm;height:2.2mm;" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2">
                 <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
               </svg>
-              <span>شهادة الكفاءة (COC):</span>
+              <span>${isAr ? "شهادة الكفاءة (COC):" : "COC Certificate:"}</span>
             </span>
             <span class="cr80-grid-value">${displayCoc}</span>
           </div>
@@ -783,25 +801,25 @@ export function generateBackCardHtml(
               <svg style="width:2.2mm;height:2.2mm;" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2">
                 <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
               </svg>
-              <span>الفحص الطبي:</span>
+              <span>${isAr ? "الفحص الطبي:" : "Medical Exam:"}</span>
             </span>
-            <span>${getMedicalExamBadgeHtml(data.medicalExamStatus)}</span>
+            <span>${getMedicalExamBadgeHtml(data.medicalExamStatus, isAr)}</span>
           </div>
         </div>
 
         <!-- Back Footer: Stamp & QR -->
         <div class="cr80-back-footer">
           <div class="cr80-stamp-box">
-            <span class="cr80-stamp-title">التوقيع والختم المعتمد</span>
+            <span class="cr80-stamp-title">${isAr ? "التوقيع والختم المعتمد" : "Authorized Stamp & Signature"}</span>
             <div class="cr80-stamp-signature">
-              <span>توقيع المدير الطبي / الختم الرسمي</span>
+              <span>${isAr ? "توقيع المدير الطبي / الختم الرسمي" : "Medical Director Signature / Seal"}</span>
             </div>
           </div>
           ${
             showQr
               ? `<div class="cr80-qr-wrapper">
                   ${generateQrCodeSvg(verificationPayload, 12)}
-                  <span class="cr80-qr-label">التحقق الذكي</span>
+                  <span class="cr80-qr-label">${isAr ? "التحقق الذكي" : "Smart Verify"}</span>
                 </div>`
               : ""
           }

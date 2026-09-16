@@ -71,54 +71,55 @@ export const TopBar: React.FC<
   const isSheetConnected = Boolean(localStorage.getItem("rec_connected_sheet_id"));
 
   return (
-    <header className="bg-[#172a46] text-white sticky top-0 z-30 shadow-md border-b border-white/10 select-none">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <header className="w-full bg-[#172a46] text-white sticky top-0 z-30 shadow-md border-b border-white/10 select-none overflow-x-hidden">
+      <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
         {/* Agency Brand & Mobile Menu Trigger */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Mobile hamburger menu button */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Mobile hamburger menu button - visible on all screens < xl (including landscape mobile & tablets) */}
           <button
             onClick={onToggleMobileMenu}
-            aria-label="قائمة الخيارات"
-            className="md:hidden p-2 -mr-1 rounded-2xl bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95 border border-white/10"
+            aria-label="قائمة الخيارات والتنقل"
+            title={isAr ? "القائمة الرئيسية" : "Main Menu"}
+            className="xl:hidden p-2 rounded-2xl bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95 border border-white/10 shrink-0"
           >
             <Menu className="w-5 h-5" />
           </button>
 
           <div
-            className="flex items-center gap-2 cursor-pointer active:opacity-80 transition-opacity"
+            className="flex items-center gap-2 cursor-pointer active:opacity-80 transition-opacity shrink-0"
             onClick={() => onNavigate("dashboard")}
           >
             <ShuaybLogo size="md" variant="horizontal" showSubtitle={false} className="text-white" />
-            <span className="hidden xl:inline-block px-2 py-0.5 text-[10px] font-bold bg-[#c9a84c]/20 text-[#c9a84c] border border-[#c9a84c]/30 rounded-full shrink-0">
+            <span className="hidden 2xl:inline-block px-2 py-0.5 text-[10px] font-bold bg-[#c9a84c]/20 text-[#c9a84c] border border-[#c9a84c]/30 rounded-full shrink-0">
               {t.agencyTag}
             </span>
           </div>
         </div>
 
-        {/* Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-1.5">
+        {/* Desktop Navigation Links - shown on xl (1280px+) where full row width is guaranteed */}
+        <nav className="hidden xl:flex items-center gap-1 shrink-0">
           <button
             onClick={() => onNavigate("dashboard")}
-            className={`px-3.5 py-2 rounded-2xl text-sm font-bold transition-all flex items-center gap-2 ${
+            className={`px-3 py-2 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shrink-0 ${
               currentView === "dashboard"
                 ? "bg-[#c9a84c] text-[#172a46] shadow-sm font-black"
                 : "text-stone-200 hover:bg-white/10 hover:text-white"
             }`}
           >
-            <LayoutDashboard className="w-4 h-4" />
-            {t.dashboard}
+            <LayoutDashboard className="w-4 h-4 shrink-0" />
+            <span>{t.dashboard}</span>
           </button>
 
           <button
             onClick={() => onNavigate("list")}
-            className={`px-3.5 py-2 rounded-2xl text-sm font-bold transition-all flex items-center gap-2 ${
+            className={`px-3 py-2 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shrink-0 ${
               currentView === "list" || currentView === "profile"
                 ? "bg-[#c9a84c] text-[#172a46] shadow-sm font-black"
                 : "text-stone-200 hover:bg-white/10 hover:text-white"
             }`}
           >
-            <Users className="w-4 h-4" />
-            {t.candidates}
+            <Users className="w-4 h-4 shrink-0" />
+            <span>{t.candidates}</span>
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/20 font-bold">
               {candidateCount}
             </span>
@@ -126,97 +127,73 @@ export const TopBar: React.FC<
 
           <button
             onClick={() => onNavigate("finance")}
-            className={`px-3.5 py-2 rounded-2xl text-sm font-bold transition-all flex items-center gap-2 ${
+            className={`px-3 py-2 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shrink-0 ${
               currentView === "finance"
                 ? "bg-[#c9a84c] text-[#172a46] shadow-sm font-black"
                 : "text-stone-200 hover:bg-white/10 hover:text-white"
             }`}
           >
-            <Wallet className="w-4 h-4" />
-            {t.finance}
+            <Wallet className="w-4 h-4 shrink-0" />
+            <span>{t.finance}</span>
           </button>
 
           <button
             onClick={() => onNavigate("activity")}
-            className={`px-3.5 py-2 rounded-2xl text-sm font-bold transition-all flex items-center gap-2 ${
+            className={`px-3 py-2 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shrink-0 ${
               currentView === "activity"
                 ? "bg-[#c9a84c] text-[#172a46] shadow-sm font-black"
                 : "text-stone-200 hover:bg-white/10 hover:text-white"
             }`}
           >
-            <Activity className="w-4 h-4" />
-            {t.activityLog}
+            <Activity className="w-4 h-4 shrink-0" />
+            <span>{t.activityLog}</span>
           </button>
 
           <button
             onClick={() => onNavigate("archive")}
-            className={`px-3.5 py-2 rounded-2xl text-sm font-bold transition-all flex items-center gap-2 ${
+            className={`px-3 py-2 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shrink-0 ${
               currentView === "archive"
                 ? "bg-[#c9a84c] text-[#172a46] shadow-sm font-black"
                 : "text-stone-200 hover:bg-white/10 hover:text-white"
             }`}
           >
-            <Archive className="w-4 h-4" />
-            {t.archive}
+            <Archive className="w-4 h-4 shrink-0" />
+            <span>{t.archive}</span>
           </button>
 
           <button
             onClick={() => onNavigate("settings")}
-            className={`px-3.5 py-2 rounded-2xl text-sm font-bold transition-all flex items-center gap-2 ${
+            className={`px-3 py-2 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shrink-0 ${
               currentView === "settings"
                 ? "bg-[#c9a84c] text-[#172a46] shadow-sm font-black"
                 : "text-stone-200 hover:bg-white/10 hover:text-white"
             }`}
           >
-            <Settings className="w-4 h-4" />
-            {t.settings}
+            <Settings className="w-4 h-4 shrink-0" />
+            <span>{t.settings}</span>
           </button>
         </nav>
 
         {/* Action Button & Integrations Trigger */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Language Switcher */}
           <button
             onClick={toggleLanguage}
             title={language === "ar" ? "Switch to English" : "التحويل إلى العربية"}
-            className="flex items-center gap-1 px-2.5 sm:px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-xs font-bold transition-all border border-white/15 active:scale-95"
+            className="flex items-center gap-1 px-2.5 sm:px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-xs font-bold transition-all border border-white/15 active:scale-95 shrink-0"
           >
-            <Languages className="w-4 h-4 text-[#c9a84c]" />
+            <Languages className="w-4 h-4 text-[#c9a84c] shrink-0" />
             <span className="text-[11px] font-bold">{t.langToggle}</span>
           </button>
 
-          {/* Install App Quick Trigger */}
-          {onOpenInstallModal && (
-            <button
-              onClick={onOpenInstallModal}
-              title={isAr ? "تثبيت التطبيق على جهازك" : "Install App"}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-xs font-bold transition-all border border-white/10 active:scale-95"
-            >
-              <Smartphone className="w-4 h-4 text-[#c9a84c]" />
-              <span className="hidden sm:inline">{isAr ? "تثبيت" : "Install"}</span>
-            </button>
-          )}
-
-          {/* Passport Scanner Quick Launch (Desktop) */}
-          {onOpenPassportScanner && (
-            <button
-              onClick={onOpenPassportScanner}
-              title="ماسح جوازات السفر والتحقق من كود MRZ"
-              className="hidden lg:flex items-center gap-1.5 px-3 py-2 bg-[#c9a84c]/20 hover:bg-[#c9a84c]/30 text-[#c9a84c] border border-[#c9a84c]/40 rounded-2xl text-xs font-black transition-all active:scale-95"
-            >
-              <Scan className="w-4 h-4" />
-              <span>{t.passportScan}</span>
-            </button>
-          )}
-
-          {/* Google Sheets Trigger (Desktop) */}
+          {/* Quick Google Sheets Trigger (Desktop 2xl) */}
           {onOpenGoogleSheetsModal && (
             <button
               onClick={onOpenGoogleSheetsModal}
               title="Google Sheets مزامنة وتكامل"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-xs font-bold transition-all border border-white/10 active:scale-95"
+              className="hidden 2xl:flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-xs font-bold transition-all border border-white/10 active:scale-95 shrink-0"
             >
-              <FileSpreadsheet className="w-4 h-4 text-[#c9a84c]" />
+              <FileSpreadsheet className="w-4 h-4 text-[#c9a84c] shrink-0" />
               <span>Sheets</span>
               {isSheetConnected && (
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="جدول متصل" />
@@ -224,27 +201,39 @@ export const TopBar: React.FC<
             </button>
           )}
 
-          {/* Google Calendar Trigger (Desktop) */}
+          {/* Google Calendar Trigger (Desktop 2xl) */}
           {onOpenGoogleCalendarModal && (
             <button
               onClick={onOpenGoogleCalendarModal}
               title={isAr ? "مزامنة المواعيد مع تقويم Google" : "Google Calendar Sync"}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-xs font-bold transition-all border border-white/10 active:scale-95"
+              className="hidden 2xl:flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-xs font-bold transition-all border border-white/10 active:scale-95 shrink-0"
             >
-              <Calendar className="w-4 h-4 text-[#c9a84c]" />
+              <Calendar className="w-4 h-4 text-[#c9a84c] shrink-0" />
               <span>{isAr ? "التقويم" : "Calendar"}</span>
             </button>
           )}
 
-          {/* Export & PDF Reports Trigger (Desktop) */}
+          {/* Export & PDF Reports Trigger */}
           {onOpenExportModal && (
             <button
               onClick={onOpenExportModal}
               title={isAr ? "تصدير وطباعة تقارير PDF و Excel" : "Export PDF & Excel Reports"}
-              className="hidden md:flex items-center gap-1.5 px-3 py-2 bg-[#c9a84c]/20 hover:bg-[#c9a84c]/30 text-[#c9a84c] border border-[#c9a84c]/40 rounded-2xl text-xs font-black transition-all active:scale-95"
+              className="hidden lg:flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white border border-white/10 rounded-2xl text-xs font-bold transition-all active:scale-95 shrink-0"
             >
-              <Download className="w-4 h-4" />
-              <span>{isAr ? "تقارير PDF" : "PDF Reports"}</span>
+              <Download className="w-4 h-4 text-[#c9a84c] shrink-0" />
+              <span className="hidden xl:inline">{isAr ? "تقارير PDF" : "PDF Reports"}</span>
+            </button>
+          )}
+
+          {/* Passport Scanner Quick Launch */}
+          {onOpenPassportScanner && (
+            <button
+              onClick={onOpenPassportScanner}
+              title="ماسح جوازات السفر والتحقق من كود MRZ"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-[#c9a84c]/20 hover:bg-[#c9a84c]/30 text-[#c9a84c] border border-[#c9a84c]/40 rounded-2xl text-xs font-black transition-all active:scale-95 shrink-0"
+            >
+              <Scan className="w-4 h-4 shrink-0" />
+              <span className="hidden md:inline">{t.passportScan}</span>
             </button>
           )}
 
@@ -253,22 +242,22 @@ export const TopBar: React.FC<
             <button
               onClick={() => onNavigate("dashboard")}
               title="تنبيهات هامة"
-              className="relative p-2 text-[#c9a84c] hover:bg-white/10 rounded-2xl transition-colors active:scale-95"
+              className="relative p-2 text-[#c9a84c] hover:bg-white/10 rounded-2xl transition-colors active:scale-95 shrink-0"
             >
-              <Bell className="w-5 h-5" />
+              <Bell className="w-5 h-5 shrink-0" />
               <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse">
                 {alertCount}
               </span>
             </button>
           )}
 
-          {/* Desktop Primary Add Button */}
+          {/* Primary Add Button (Always Accessible on all screens) */}
           <button
             onClick={onAddCandidate}
-            className="hidden sm:flex items-center gap-1.5 sm:gap-2 bg-[#c9a84c] hover:bg-[#d8b759] text-[#172a46] px-3 sm:px-4 py-2 rounded-2xl font-extrabold text-xs sm:text-sm shadow-md transition-all active:scale-95 shrink-0"
+            className="flex items-center gap-1.5 sm:gap-2 bg-[#c9a84c] hover:bg-[#d8b759] text-[#172a46] px-3 sm:px-4 py-2 rounded-2xl font-extrabold text-xs sm:text-sm shadow-md transition-all active:scale-95 shrink-0"
           >
-            <Plus className="w-4 h-4 stroke-[3]" />
-            <span>{t.addCandidate}</span>
+            <Plus className="w-4 h-4 stroke-[3] shrink-0" />
+            <span className="whitespace-nowrap">{t.addCandidate}</span>
           </button>
         </div>
       </div>
@@ -651,7 +640,7 @@ export const MobileDrawer: React.FC<{
       />
 
       {/* Drawer content */}
-      <div className="relative w-4/5 max-w-xs bg-[#172a46] text-white h-full flex flex-col justify-between shadow-2xl p-5 z-10 border-l border-white/10 animate-in slide-in-from-right duration-200">
+      <div className="relative w-4/5 max-w-xs bg-[#172a46] text-white h-full flex flex-col justify-between shadow-2xl p-5 z-10 border-l border-white/10 animate-in slide-in-from-right duration-200 overflow-y-auto">
         {/* Top Header info */}
         <div>
           <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">

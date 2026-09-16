@@ -8,22 +8,42 @@ export const STORAGE_KEYS = {
 };
 
 export const STAGES: StageConfig[] = [
-  { id: "NEW", label: "مسجل جديد", color: "bg-blue-500", bgColor: "bg-blue-50", textColor: "text-blue-700", stepNumber: 1 },
-  { id: "INTERVIEW", label: "مقابلة واختبار", color: "bg-indigo-500", bgColor: "bg-indigo-50", textColor: "text-indigo-700", stepNumber: 2 },
-  { id: "MEDICAL", label: "فحص طبي", color: "bg-amber-500", bgColor: "bg-amber-50", textColor: "text-amber-700", stepNumber: 3 },
-  { id: "TRAINING", label: "تدريب وتأهيل", color: "bg-orange-500", bgColor: "bg-orange-50", textColor: "text-orange-700", stepNumber: 4 },
-  { id: "CONTRACT", label: "توقيع العقد", color: "bg-purple-500", bgColor: "bg-purple-50", textColor: "text-purple-700", stepNumber: 5 },
-  { id: "VISA", label: "إصدار التأشيرة", color: "bg-pink-500", bgColor: "bg-pink-50", textColor: "text-pink-700", stepNumber: 6 },
-  { id: "FLIGHT", label: "حجز الطيران", color: "bg-cyan-500", bgColor: "bg-cyan-50", textColor: "text-cyan-700", stepNumber: 7 },
-  { id: "READY", label: "جاهز للسفر", color: "bg-emerald-500", bgColor: "bg-emerald-50", textColor: "text-emerald-700", stepNumber: 8 },
-  { id: "TRAVELLED", label: "سافر بنجاح", color: "bg-green-600", bgColor: "bg-green-50", textColor: "text-green-800", stepNumber: 9 },
-  { id: "COMPLETED", label: "مكتمل العقد", color: "bg-slate-700", bgColor: "bg-slate-100", textColor: "text-slate-800", stepNumber: 10 },
-  { id: "CANCELLED", label: "ملغي / مستبعد", color: "bg-rose-500", bgColor: "bg-rose-50", textColor: "text-rose-700", stepNumber: 11 }
+  { id: "NEW", label: "New Registered", color: "bg-blue-500", bgColor: "bg-blue-50", textColor: "text-blue-700", stepNumber: 1 },
+  { id: "INTERVIEW", label: "Interview & Test", color: "bg-indigo-500", bgColor: "bg-indigo-50", textColor: "text-indigo-700", stepNumber: 2 },
+  { id: "MEDICAL", label: "Medical Check", color: "bg-amber-500", bgColor: "bg-amber-50", textColor: "text-amber-700", stepNumber: 3 },
+  { id: "TRAINING", label: "Training & Orientation", color: "bg-orange-500", bgColor: "bg-orange-50", textColor: "text-orange-700", stepNumber: 4 },
+  { id: "CONTRACT", label: "Contract Signed", color: "bg-purple-500", bgColor: "bg-purple-50", textColor: "text-purple-700", stepNumber: 5 },
+  { id: "VISA", label: "Visa Processing", color: "bg-pink-500", bgColor: "bg-pink-50", textColor: "text-pink-700", stepNumber: 6 },
+  { id: "FLIGHT", label: "Flight Booking", color: "bg-cyan-500", bgColor: "bg-cyan-50", textColor: "text-cyan-700", stepNumber: 7 },
+  { id: "READY", label: "Ready to Travel", color: "bg-emerald-500", bgColor: "bg-emerald-50", textColor: "text-emerald-700", stepNumber: 8 },
+  { id: "TRAVELLED", label: "Travelled & Placed", color: "bg-green-600", bgColor: "bg-green-50", textColor: "text-green-800", stepNumber: 9 },
+  { id: "COMPLETED", label: "Contract Completed", color: "bg-slate-700", bgColor: "bg-slate-100", textColor: "text-slate-800", stepNumber: 10 },
+  { id: "CANCELLED", label: "Cancelled / Dropped", color: "bg-rose-500", bgColor: "bg-rose-50", textColor: "text-rose-700", stepNumber: 11 }
 ];
 
+export const getStageLabel = (stageId: string, isAr: boolean = false): string => {
+  const stage = STAGES.find(s => s.id === stageId);
+  if (!stage) return stageId;
+  if (!isAr) return stage.label;
+  const arMap: Record<string, string> = {
+    NEW: "مسجل جديد",
+    INTERVIEW: "مقابلة واختبار",
+    MEDICAL: "فحص طبي",
+    TRAINING: "تدريب وتأهيل",
+    CONTRACT: "توقيع العقد",
+    VISA: "إصدار التأشيرة",
+    FLIGHT: "حجز الطيران",
+    READY: "جاهز للسفر",
+    TRAVELLED: "سافر بنجاح",
+    COMPLETED: "مكتمل العقد",
+    CANCELLED: "ملغي / مستبعد"
+  };
+  return arMap[stageId] || stage.label;
+};
+
 export const DEFAULT_SETTINGS: AgencySettings = {
-  agencyName: "وكالة شُعيب للاستقدام والتبادل التجاري",
-  agencySubtitle: "Shuayb Trade Bridge - تسهيل خدمات الاستقدام والتوظيف والتبادل التجاري",
+  agencyName: "Shuayb Recruitment & Trade Agency",
+  agencySubtitle: "Shuayb Trade Bridge - Manpower Recruitment & Commercial Trade Services",
   currency: "ETB",
   nextId: 1,
   phone: "",

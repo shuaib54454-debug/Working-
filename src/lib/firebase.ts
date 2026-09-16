@@ -381,6 +381,101 @@ export async function syncAllCandidatesBatch(candidates: Candidate[], ownerUid?:
   }
 }
 
+/**
+ * Real-time bulk archive synchronization with Cloud Firestore.
+ * Atomically updates multiple candidate documents to archived status using writeBatch.
+ * Any listening devices will instantly receive the state update via onSnapshot.
+ */
+export async function bulkArchiveCandidatesInCloud(
+  candidateIds: string[],
+  ownerUid?: string,
+  candidatesData?: Candidate[]
+): Promise<void> {
+  try {
+    if (!auth.currentUser) return;
+    const uid = ownerUid || auth.currentUser.uid;
+    if (!uid || candidateIds.length === 0) return;
+
+    await withDbRetry(async () => {
+      const batch = writeBatch(db);
+      const nowIso = new Date().toISOString();
+      const candMap = new Map<string, Candidate>();
+      if (candidatesData) {
+        candidatesData.forEach((c) => candMap.set(c.id, c));
+      }
+
+      candidateIds.forEach((id) => {
+        const existingCand = candMap.get(id);
+        const updatePayload: Record<string, unknown> = {
+          archived: true,
+          ownerUid: uid,
+          updatedAt: nowIso
+        };
+        if (existingCand) {
+          Object.assign(updatePayload, existingCand, {
+            archived: true,
+            ownerUid: uid,
+            updatedAt: nowIso
+          });
+        }
+        batch.set(doc(db, "candidates", id), updatePayload, { merge: true });
+      });
+
+      await batch.commit();
+    });
+  } catch (e) {
+    handleFirestoreError(e, OperationType.WRITE, "candidates/bulkArchive");
+    throw e;
+  }
+}
+
+/**
+ * Real-time bulk restore synchronization with Cloud Firestore.
+ * Atomically restores multiple candidate documents from archive using writeBatch.
+ */
+export async function bulkRestoreCandidatesInCloud(
+  candidateIds: string[],
+  ownerUid?: string,
+  candidatesData?: Candidate[]
+): Promise<void> {
+  try {
+    if (!auth.currentUser) return;
+    const uid = ownerUid || auth.currentUser.uid;
+    if (!uid || candidateIds.length === 0) return;
+
+    await withDbRetry(async () => {
+      const batch = writeBatch(db);
+      const nowIso = new Date().toISOString();
+      const candMap = new Map<string, Candidate>();
+      if (candidatesData) {
+        candidatesData.forEach((c) => candMap.set(c.id, c));
+      }
+
+      candidateIds.forEach((id) => {
+        const existingCand = candMap.get(id);
+        const updatePayload: Record<string, unknown> = {
+          archived: false,
+          ownerUid: uid,
+          updatedAt: nowIso
+        };
+        if (existingCand) {
+          Object.assign(updatePayload, existingCand, {
+            archived: false,
+            ownerUid: uid,
+            updatedAt: nowIso
+          });
+        }
+        batch.set(doc(db, "candidates", id), updatePayload, { merge: true });
+      });
+
+      await batch.commit();
+    });
+  } catch (e) {
+    handleFirestoreError(e, OperationType.WRITE, "candidates/bulkRestore");
+    throw e;
+  }
+}
+
 export function subscribeToExpenses(
   ownerUid: string,
   onUpdate: (expenses: GeneralExpense[]) => void,
