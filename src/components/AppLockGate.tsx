@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { App as CapApp } from "@capacitor/app";
-import { isAppLockEnabled, authenticateToUnlock, isNativeApp } from "../lib/appLock";
+import { APP_LOCK_CHANGED_EVENT, isAppLockEnabled, authenticateToUnlock, isNativeApp } from "../lib/appLock";
 import { AppLockScreen } from "./AppLockScreen";
-
-const APP_LOCK_CHANGED_EVENT = "shuayb:app-lock-changed";
+import { AppLockControl } from "./AppLockControl";
 
 export const AppLockGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [locked, setLocked] = useState(() => isNativeApp() && isAppLockEnabled());
@@ -30,15 +29,7 @@ export const AppLockGate: React.FC<{ children: React.ReactNode }> = ({ children 
       void authenticateToUnlock().then((unlocked) => setLocked(!unlocked));
     });
 
-    const lockChangedListener = () => {
-      if (!isAppLockEnabled()) {
-        setLocked(false);
-      } else {
-        // Enabling is authenticated by SettingsView before this event is emitted.
-        setLocked(false);
-      }
-    };
-
+    const lockChangedListener = () => setLocked(false);
     window.addEventListener(APP_LOCK_CHANGED_EVENT, lockChangedListener);
 
     return () => {
@@ -51,7 +42,10 @@ export const AppLockGate: React.FC<{ children: React.ReactNode }> = ({ children 
     return <AppLockScreen onUnlocked={() => setLocked(false)} />;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <AppLockControl />
+    </>
+  );
 };
-
-export const APP_LOCK_CHANGED_EVENT_NAME = APP_LOCK_CHANGED_EVENT;
