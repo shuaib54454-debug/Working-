@@ -104,3 +104,5 @@ jobs:
           git rm -f .github/workflows/passport-fix.yml
           git commit -m 'chore: remove one-time passport hardening workflow'
           git push origin HEAD:main
+
+# one-time execution trigger
