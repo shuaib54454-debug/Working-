@@ -4,6 +4,7 @@ import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebas
 import { doc, getDoc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 
 const projectId = "demo-shuayb-rules";
+const ownerEmail = "shuaib54454@gmail.com";
 
 const env = await initializeTestEnvironment({
   projectId,
@@ -16,9 +17,9 @@ const env = await initializeTestEnvironment({
 });
 
 try {
-  const owner = env.authenticatedContext("owner-a");
-  const other = env.authenticatedContext("owner-b");
-  const admin = env.authenticatedContext("admin-a", { email: "admin@example.com", admin: true });
+  const owner = env.authenticatedContext("owner-a", { email: ownerEmail });
+  const other = env.authenticatedContext("owner-b", { email: "other@example.com" });
+  const adminClaim = env.authenticatedContext("admin-a", { email: ownerEmail, admin: true });
 
   await env.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
@@ -34,17 +35,16 @@ try {
     });
     await setDoc(doc(db, "expenses/EXP-1"), { ownerUid: "owner-a", amount: 100 });
     await setDoc(doc(db, "settings/owner-a"), { ownerUid: "owner-a", agencyName: "Shuayb" });
-    await setDoc(doc(db, "admins/admin-a"), { role: "admin" });
   });
 
   assert.equal((await getDoc(doc(owner.firestore(), "candidates/CAND-1"))).exists(), true);
   await assertFails(getDoc(doc(other.firestore(), "candidates/CAND-1")));
-  await assertSucceeds(getDoc(doc(admin.firestore(), "candidates/CAND-1")));
+  await assertFails(getDoc(doc(adminClaim.firestore(), "candidates/CAND-1")));
 
   await assertSucceeds(updateDoc(doc(owner.firestore(), "candidates/CAND-1"), { firstName: "New" }));
   await assertFails(updateDoc(doc(owner.firestore(), "candidates/CAND-1"), { ownerUid: "owner-b" }));
   await assertFails(deleteDoc(doc(other.firestore(), "candidates/CAND-1")));
-  await assertSucceeds(deleteDoc(doc(admin.firestore(), "candidates/CAND-2")));
+  await assertFails(deleteDoc(doc(adminClaim.firestore(), "candidates/CAND-2")));
 
   await assertSucceeds(setDoc(doc(owner.firestore(), "candidates/CAND-3"), {
     ownerUid: "owner-a",
@@ -60,14 +60,15 @@ try {
   await assertSucceeds(getDoc(doc(owner.firestore(), "settings/owner-a")));
   await assertFails(getDoc(doc(other.firestore(), "settings/owner-a")));
   await assertFails(setDoc(doc(other.firestore(), "settings/owner-a"), { ownerUid: "owner-b" }));
-  await assertSucceeds(getDoc(doc(admin.firestore(), "admins/admin-a")));
+  await assertFails(getDoc(doc(adminClaim.firestore(), "settings/owner-a")));
   await assertFails(setDoc(doc(owner.firestore(), "admins/owner-b"), { role: "admin" }));
 
   const ownerStorage = owner.storage();
   const otherStorage = other.storage();
-  const adminStorage = admin.storage();
+  const adminStorage = adminClaim.storage();
   const ownerRef = ownerStorage.ref("workers/CAND-1/passport/passport.pdf");
   const otherRef = otherStorage.ref("workers/CAND-1/passport/passport.pdf");
+  const adminRef = adminStorage.ref("workers/CAND-1/passport/passport.pdf");
 
   await assertSucceeds(ownerRef.put(new Uint8Array([1, 2, 3]), {
     contentType: "application/pdf",
@@ -79,13 +80,13 @@ try {
     contentType: "application/pdf",
     customMetadata: { ownerUid: "owner-b" },
   }));
+  await assertFails(adminRef.getMetadata());
   await assertFails(ownerStorage.ref("workers/CAND-1/passport/bad.txt").put(new Uint8Array([1]), {
     contentType: "text/plain",
     customMetadata: { ownerUid: "owner-a" },
   }));
-  await assertSucceeds(adminStorage.ref("workers/CAND-1/passport/passport.pdf").getMetadata());
 
-  console.log("Firebase Firestore + Storage rules tests passed.");
+  console.log("Firebase Firestore + Storage single-owner rules tests passed.");
 } finally {
   await env.cleanup();
 }
