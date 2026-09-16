@@ -10,13 +10,38 @@ export interface CompressImageOptions {
   mimeType?: string;
 }
 
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64 = ""] = dataUrl.split(",", 2);
+  const mime = header.match(/^data:([^;]+)/i)?.[1] || "application/octet-stream";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
 /**
- * Resizes and compresses an image data URL or File to optimal resolution for OCR.
+ * Resizes and compresses an image for OCR/UI callers and returns a Data URL.
  */
-export async function compressImage(
+export function compressImage(source: string | File | Blob, options?: CompressImageOptions): Promise<string>;
+/**
+ * Backward-compatible overload for storage upload callers that need a Blob.
+ */
+export function compressImage(source: string | File | Blob, maxWidth: number, quality: number): Promise<Blob>;
+export function compressImage(
   source: string | File | Blob,
-  options: CompressImageOptions = {}
-): Promise<string> {
+  optionsOrMaxWidth: CompressImageOptions | number = {},
+  legacyQuality?: number
+): Promise<string | Blob> {
+  const legacyBlobMode = typeof optionsOrMaxWidth === "number";
+  const options: CompressImageOptions = legacyBlobMode
+    ? {
+        maxWidth: optionsOrMaxWidth,
+        maxHeight: optionsOrMaxWidth,
+        quality: legacyQuality ?? 0.85,
+        mimeType: "image/jpeg"
+      }
+    : optionsOrMaxWidth;
+
   const {
     maxWidth = 1600,
     maxHeight = 1600,
@@ -25,13 +50,15 @@ export async function compressImage(
   } = options;
 
   return new Promise((resolve, reject) => {
-    // 1. Convert File/Blob to DataURL if needed
+    const finish = (dataUrl: string) => {
+      resolve(legacyBlobMode ? dataUrlToBlob(dataUrl) : dataUrl);
+    };
+
     const loadDataUrl = (dataUrl: string) => {
       const img = new Image();
       img.onload = () => {
         let { width, height } = img;
 
-        // Calculate aspect-ratio preserving dimensions
         if (width > maxWidth || height > maxHeight) {
           if (width / maxWidth > height / maxHeight) {
             height = Math.round((height * maxWidth) / width);
@@ -48,47 +75,40 @@ export async function compressImage(
 
         const ctx = canvas.getContext("2d");
         if (!ctx) {
-          // Fallback to original
-          resolve(dataUrl);
+          finish(dataUrl);
           return;
         }
 
-        // Draw image onto canvas
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
         try {
-          const compressedDataUrl = canvas.toDataURL(mimeType, quality);
-          resolve(compressedDataUrl);
-        } catch (err) {
-          // In case of error, return original
-          resolve(dataUrl);
+          finish(canvas.toDataURL(mimeType, quality));
+        } catch {
+          finish(dataUrl);
         }
       };
 
-      img.onerror = () => {
-        // Fallback to original string if image failed to render on canvas
-        resolve(dataUrl);
-      };
-
+      img.onerror = () => finish(dataUrl);
       img.src = dataUrl;
     };
 
     if (typeof source === "string") {
       loadDataUrl(source);
-    } else {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const result = e.target?.result as string;
-        if (result) {
-          loadDataUrl(result);
-        } else {
-          reject(new Error("Failed to read image file"));
-        }
-      };
-      reader.onerror = () => reject(new Error("Failed to read image file"));
-      reader.readAsDataURL(source);
+      return;
     }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result;
+      if (typeof result === "string" && result) {
+        loadDataUrl(result);
+      } else {
+        reject(new Error("Failed to read image file"));
+      }
+    };
+    reader.onerror = () => reject(new Error("Failed to read image file"));
+    reader.readAsDataURL(source);
   });
 }
