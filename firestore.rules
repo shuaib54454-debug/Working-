@@ -82,11 +82,12 @@ service cloud.firestore {
       allow read, write: if isOwner();
     }
 
-    // 6. Audit/activity log is private to the owner in the current phase.
+    // 6. Audit/activity log: every document must be owned by the signed-in owner.
     match /activities/{activityId} {
-      allow get, list: if isOwner();
-      allow create: if isOwner() && isValidId(activityId);
-      allow update, delete: if isOwner();
+      allow get, list: if ownsExistingDocument();
+      allow create: if isValidId(activityId) && ownsNewDocument();
+      allow update: if isValidId(activityId) && ownsUpdatedDocument();
+      allow delete: if isValidId(activityId) && ownsExistingDocument();
     }
   }
 }
