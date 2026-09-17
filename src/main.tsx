@@ -1,5 +1,6 @@
 import React, { StrictMode, Component, ErrorInfo, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import './lib/sensitiveLocalCache';
 import App from './App';
 import { AppLockGate } from './components/AppLockGate';
 import { LanguageProvider } from './lib/LanguageContext';
