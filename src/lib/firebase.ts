@@ -271,15 +271,90 @@ export async function uploadWorkerDocument(candidateId: string, folder: WorkerSt
 
 export async function deleteWorkerDocument(storagePath?: string): Promise<void> { if (!storagePath || !storage || !auth.currentUser) return; try { await deleteObject(storageRef(storage, storagePath)); } catch (err: any) { console.warn("Could not delete worker document:", err?.message || err); } }
 
-export async function autoMigrateExistingDataToOwner(ownerUid: string, currentCandidates: Candidate[], currentExpenses: GeneralExpense[], currentSettings: AgencySettings): Promise<{ candidatesMigrated: number; expensesMigrated: number; settingsMigrated: boolean }> {
-  let candidatesMigrated = 0, expensesMigrated = 0, settingsMigrated = false;
+// Migration-only writes deliberately rethrow failures. The normal sync helpers above
+// preserve their historical fire-and-forget behavior for UI operations.
+async function migrateCandidatesStrict(candidates: Candidate[], ownerUid: string): Promise<void> {
+  if (!auth.currentUser || candidates.length === 0) return;
+  await withDbRetry(async () => {
+    for (let i = 0; i < candidates.length; i += 450) {
+      const batch = writeBatch(db);
+      candidates.slice(i, i + 450).forEach(c => batch.set(doc(db, "candidates", c.id), { ...c, ownerUid }, { merge: true }));
+      await batch.commit();
+    }
+  });
+}
+
+async function migrateExpensesStrict(expenses: GeneralExpense[], ownerUid: string): Promise<void> {
+  if (!auth.currentUser || expenses.length === 0) return;
+  await withDbRetry(async () => {
+    for (let i = 0; i < expenses.length; i += 450) {
+      const batch = writeBatch(db);
+      expenses.slice(i, i + 450).forEach(e => batch.set(doc(db, "expenses", String(e.id)), { ...e, ownerUid }, { merge: true }));
+      await batch.commit();
+    }
+  });
+}
+
+async function migrateActivitiesStrict(activities: ActivityLogEntry[], ownerUid: string): Promise<void> {
+  if (!auth.currentUser || activities.length === 0) return;
+  await withDbRetry(async () => {
+    for (let i = 0; i < activities.length; i += 450) {
+      const batch = writeBatch(db);
+      activities.slice(i, i + 450).forEach(a => batch.set(doc(db, "activities", a.id), { ...a, ownerUid }, { merge: true }));
+      await batch.commit();
+    }
+  });
+}
+
+async function migrateSettingsStrict(settings: AgencySettings, ownerUid: string): Promise<void> {
+  if (!auth.currentUser) return;
+  await withDbRetry(() => setDoc(doc(db, "settings", ownerUid), { ...settings, ownerUid }, { merge: true }));
+}
+
+export async function autoMigrateExistingDataToOwner(
+  ownerUid: string,
+  currentCandidates: Candidate[],
+  currentExpenses: GeneralExpense[],
+  currentSettings: AgencySettings,
+  currentActivities?: ActivityLogEntry[]
+): Promise<{ candidatesMigrated: number; expensesMigrated: number; activitiesMigrated: number; settingsMigrated: boolean }> {
+  if (!auth.currentUser || auth.currentUser.uid !== ownerUid || (auth.currentUser.email || "").toLowerCase() !== OWNER_EMAIL) {
+    return { candidatesMigrated: 0, expensesMigrated: 0, activitiesMigrated: 0, settingsMigrated: false };
+  }
+
+  let candidatesMigrated = 0;
+  let expensesMigrated = 0;
+  let activitiesMigrated = 0;
+  let settingsMigrated = false;
+
   try {
     const candToMigrate = currentCandidates.filter(c => !c.ownerUid || c.ownerUid === ownerUid).map(c => ({ ...c, ownerUid }));
-    if (candToMigrate.length) { await syncAllCandidatesBatch(candToMigrate, ownerUid); candidatesMigrated = candToMigrate.length; }
+    if (candToMigrate.length) {
+      await migrateCandidatesStrict(candToMigrate, ownerUid);
+      candidatesMigrated = candToMigrate.length;
+    }
+
     const expToMigrate = currentExpenses.filter(e => !e.ownerUid || e.ownerUid === ownerUid).map(e => ({ ...e, ownerUid }));
-    if (expToMigrate.length) { await syncAllExpensesBatch(expToMigrate, ownerUid); expensesMigrated = expToMigrate.length; }
+    if (expToMigrate.length) {
+      await migrateExpensesStrict(expToMigrate, ownerUid);
+      expensesMigrated = expToMigrate.length;
+    }
+
+    const activitiesToMigrate = (currentActivities || []).filter(a => !a.ownerUid || a.ownerUid === ownerUid).map(a => ({ ...a, ownerUid }));
+    if (activitiesToMigrate.length) {
+      await migrateActivitiesStrict(activitiesToMigrate, ownerUid);
+      activitiesMigrated = activitiesToMigrate.length;
+    }
+
     const settingsOwner = (currentSettings as AgencySettings & { ownerUid?: string }).ownerUid;
-    if (!settingsOwner || settingsOwner === ownerUid) { await syncSettingsToCloud({ ...currentSettings, ownerUid }, ownerUid); settingsMigrated = true; }
-  } catch (error) { console.warn("Legacy data migration encountered an issue:", error instanceof Error ? error.message : String(error)); }
-  return { candidatesMigrated, expensesMigrated, settingsMigrated };
+    if (!settingsOwner || settingsOwner === ownerUid) {
+      await migrateSettingsStrict(currentSettings, ownerUid);
+      settingsMigrated = true;
+    }
+  } catch (error) {
+    console.warn("Legacy data migration encountered an issue; local data was not marked as migrated:", error instanceof Error ? error.message : String(error));
+    return { candidatesMigrated, expensesMigrated, activitiesMigrated, settingsMigrated: false };
+  }
+
+  return { candidatesMigrated, expensesMigrated, activitiesMigrated, settingsMigrated };
 }
