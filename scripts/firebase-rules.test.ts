@@ -35,6 +35,11 @@ try {
     });
     await setDoc(doc(db, "expenses/EXP-1"), { ownerUid: "owner-a", amount: 100 });
     await setDoc(doc(db, "settings/owner-a"), { ownerUid: "owner-a", agencyName: "Shuayb" });
+    await setDoc(doc(db, "activities/ACT-1"), {
+      ownerUid: "owner-a",
+      actionType: "CANDIDATE_CREATED",
+      title: "Test activity",
+    });
   });
 
   assert.equal((await getDoc(doc(owner.firestore(), "candidates/CAND-1"))).exists(), true);
@@ -62,6 +67,26 @@ try {
   await assertFails(setDoc(doc(other.firestore(), "settings/owner-a"), { ownerUid: "owner-b" }));
   await assertFails(getDoc(doc(adminClaim.firestore(), "settings/owner-a")));
   await assertFails(setDoc(doc(owner.firestore(), "admins/owner-b"), { role: "admin" }));
+
+  // Activity ownership: owner can read/create/update/delete only documents owned by owner-a.
+  assert.equal((await getDoc(doc(owner.firestore(), "activities/ACT-1"))).exists(), true);
+  await assertFails(getDoc(doc(other.firestore(), "activities/ACT-1")));
+  await assertFails(getDoc(doc(adminClaim.firestore(), "activities/ACT-1")));
+  await assertSucceeds(setDoc(doc(owner.firestore(), "activities/ACT-2"), {
+    ownerUid: "owner-a",
+    actionType: "NOTE_ADDED",
+    title: "Owner activity",
+  }));
+  await assertFails(setDoc(doc(owner.firestore(), "activities/ACT-3"), {
+    ownerUid: "owner-b",
+    actionType: "NOTE_ADDED",
+    title: "Cross-owner activity",
+  }));
+  await assertFails(updateDoc(doc(owner.firestore(), "activities/ACT-1"), { ownerUid: "owner-b" }));
+  await assertSucceeds(updateDoc(doc(owner.firestore(), "activities/ACT-1"), { title: "Updated" }));
+  await assertFails(deleteDoc(doc(other.firestore(), "activities/ACT-1")));
+  await assertFails(deleteDoc(doc(adminClaim.firestore(), "activities/ACT-1")));
+  await assertSucceeds(deleteDoc(doc(owner.firestore(), "activities/ACT-2")));
 
   const ownerStorage = owner.storage();
   const otherStorage = other.storage();
