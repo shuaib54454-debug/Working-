@@ -109,24 +109,24 @@ export interface Candidate {
   medicalStoragePath?: string;
   medicalUrl?: string;
   medicalDocId?: string;
-  cocStoragePath?: string; // Firebase Cloud Storage path: workers/{id}/coc/...
+  cocStoragePath?: string;
   cocImageUrl?: string;
   cocDocId?: string;
   uploadedDocuments?: WorkerDocumentRecord[];
   stage: StageId;
-  medicalStatus?: string; // "لائق طبياً", "بانتظار النتيجة", "غير لائق", "لم يفحص"
+  medicalStatus?: string;
   medicalDate?: string;
-  cocNumber?: string; // رقم شهادة الكفاءة المهنية COC (Certificate of Competence)
-  cocStatus?: string; // "معتمد ومجتاز", "قيد الاختبار", "بانتظار النتيجة", "غير مجتاز", "لم يختبر بعد"
+  cocNumber?: string;
+  cocStatus?: string;
   cocIssueDate?: string;
-  trainingStatus?: string; // "مكتمل", "قيد التدريب", "لم يبدأ"
-  visaStatus?: string; // "صدرت", "قيد الإجراء", "مرفوضة", "لم تقدم"
+  trainingStatus?: string;
+  visaStatus?: string;
   visaNumber?: string;
-  flightStatus?: string; // "تم الحجز", "بانتظار التأكيد", "لم تحجز"
+  flightStatus?: string;
   flightDate?: string;
   flightTicketNumber?: string;
   totalFees: number;
-  agencyLiability?: number; // مستحقات الوكالة / رسوم الاستقدام المترتبة على الوكالة المخصومة من أتعاب التوظيف
+  agencyLiability?: number;
   payments: PaymentRecord[];
   expenses: CandidateExpense[];
   registrationDate: string;
@@ -134,8 +134,8 @@ export interface Candidate {
   updatedAt?: string;
   notes?: string;
   noteEntries?: CandidateNoteEntry[];
-  agentName?: string; // اسم الوسيط / المندوب
-  sponsorName?: string; // اسم الكفيل / صاحب العمل
+  agentName?: string;
+  sponsorName?: string;
   contractDurationYears?: number;
   stageHistory?: CandidateStageHistoryEntry[];
 }
@@ -156,11 +156,11 @@ export interface AgencySettings {
 export interface FinanceSummary {
   fees: number;
   agencyLiability: number;
-  netFees: number; // الأتعاب الصافية بعد خصم مستحقات الوكالة (fees - agencyLiability)
+  netFees: number;
   paid: number;
   exp: number;
   outstanding: number;
-  profit: number; // الربح الصافي بعد خصم مستحقات الوكالة والمصروفات
+  profit: number;
   paymentProgress: number;
 }
 
@@ -193,13 +193,14 @@ export type ActivityCategory =
   | "SETTINGS";
 
 export interface ActivityLogEntry {
-  id: string; // e.g. "ACT-2026-X8Y1"
+  id: string;
+  ownerUid?: string;
   actionType: ActivityActionType;
   category: ActivityCategory;
   title: string;
   description: string;
-  timestamp: number; // Date.now()
-  date: string; // ISO string
+  timestamp: number;
+  date: string;
   userEmail: string;
   userName?: string;
   userUid?: string;
