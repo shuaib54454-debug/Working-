@@ -482,10 +482,10 @@ export default function App() {
     };
 
     setCandidates(prev => [newCandidate, ...prev]);
-    if (uid) syncCandidateToCloud(newCandidate, uid);
+    if (uid) syncCandidateToCloud(newCandidate, uid).catch(err => console.error("Cloud candidate sync error:", err));
     setSettings(prev => {
       const updated = { ...prev, nextId: prev.nextId + 1, ownerUid: uid };
-      if (uid) syncSettingsToCloud(updated, uid);
+      if (uid) syncSettingsToCloud(updated, uid).catch(err => console.error("Cloud settings sync error:", err));
       return updated;
     });
 
@@ -618,7 +618,7 @@ export default function App() {
           }
 
           const updatedCand = { ...c, ...updates, stageHistory, ownerUid: uid };
-          if (uid) syncCandidateToCloud(updatedCand, uid);
+          if (uid) syncCandidateToCloud(updatedCand, uid).catch(err => console.error("Cloud candidate sync error:", err));
           return updatedCand;
         }
         return c;
@@ -831,7 +831,7 @@ export default function App() {
       ownerUid: uid
     };
     setGeneralExpenses(prev => [newExp, ...prev]);
-    if (uid) syncExpenseToCloud(newExp, uid);
+    if (uid) syncExpenseToCloud(newExp, uid).catch(err => console.error("Cloud expense sync error:", err));
 
     logActivity(
       "EXPENSE_GENERAL_ADDED",
@@ -893,7 +893,7 @@ export default function App() {
     if (uid) {
       syncAllCandidatesBatch(withUidCandidates, uid);
       syncAllExpensesBatch(withUidExpenses, uid);
-      syncSettingsToCloud(withUidSettings, uid);
+      syncSettingsToCloud(withUidSettings, uid).catch(err => console.error("Cloud settings restore sync error:", err));
     }
   };
 
