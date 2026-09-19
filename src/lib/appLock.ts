@@ -1,5 +1,5 @@
 import { Capacitor } from "@capacitor/core";
-import { BiometryType, NativeBiometric } from "@capgo/capacitor-native-biometric";
+import { BiometricAuth } from "@aparajita/capacitor-biometric-auth";
 
 export const APP_LOCK_STORAGE_KEY = "shuayb_app_lock_enabled";
 export const APP_LOCK_CHANGED_EVENT = "shuayb:app-lock-changed";
@@ -27,8 +27,8 @@ export async function canUseDeviceAuthentication(): Promise<boolean> {
   if (!isNativeApp()) return false;
 
   try {
-    const result = await NativeBiometric.isAvailable({ useFallback: true });
-    return Boolean(result.isAvailable);
+    const result = await BiometricAuth.checkBiometry();
+    return Boolean(result.isAvailable || result.deviceIsSecure);
   } catch {
     return false;
   }
@@ -38,18 +38,12 @@ export async function authenticateToUnlock(): Promise<boolean> {
   if (!isNativeApp()) return true;
 
   try {
-    await NativeBiometric.verifyIdentity({
+    await BiometricAuth.authenticate({
       reason: "افتح التطبيق للوصول إلى بيانات المرشحين",
-      title: "فتح تطبيق شعيب",
-      subtitle: "التحقق من هوية مستخدم الجهاز",
-      description: "استخدم البصمة أو رمز PIN/قفل الجهاز للمتابعة.",
-      allowedBiometryTypes: [
-        BiometryType.FINGERPRINT,
-        BiometryType.FACE_AUTHENTICATION,
-        BiometryType.IRIS_AUTHENTICATION,
-        BiometryType.DEVICE_CREDENTIAL
-      ],
-      maxAttempts: 5
+      androidTitle: "فتح تطبيق شعيب",
+      androidSubtitle: "التحقق من هوية مستخدم الجهاز",
+      allowDeviceCredential: true,
+      cancelTitle: "إلغاء",
     });
     return true;
   } catch {
