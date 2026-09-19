@@ -688,31 +688,38 @@ export default function App() {
     );
   };
 
-  const handlePermanentDeleteCandidate = (id: string) => {
+  const getCandidateStoragePaths = (candidate: Candidate | undefined): string[] => {
+    if (!candidate) return [];
+    return [
+      candidate.passportStoragePath,
+      candidate.photoStoragePath,
+      candidate.contractStoragePath,
+      candidate.visaStoragePath,
+      candidate.medicalStoragePath,
+      candidate.cocStoragePath,
+      ...(candidate.uploadedDocuments || []).map(doc => doc.storagePath)
+    ].filter((path): path is string => Boolean(path));
+  };
+
+  const handlePermanentDeleteCandidate = async (id: string) => {
     const target = candidates.find(c => c.id === id);
-    const candName = target ? `${target.firstName} ${target.lastName}`.trim() : id;
-
-    setCandidates(prev => {
-      const next = prev.filter(c => c.id !== id);
-      try {
-        localStorage.setItem(STORAGE_KEYS.candidates, JSON.stringify(next));
-      } catch (e) {
-        console.warn("Failed to persist candidates to localStorage:", e);
-      }
-      return next;
-    });
-    if (activeCandidateId === id) {
-      setActiveCandidateId(null);
+    if (!target) return;
+    const candName = `${target.firstName} ${target.lastName}`.trim() || id;
+    try {
+      await deleteCandidateFromCloud(id, getCandidateStoragePaths(target));
+      setCandidates(prev => prev.filter(c => c.id !== id));
+      if (activeCandidateId === id) setActiveCandidateId(null);
+      logActivity(
+        "CANDIDATE_DELETED",
+        "CANDIDATE",
+        `حذف نهائي لمرشح: ${candName}`,
+        `تم حذف ملف المرشح (${candName}) برقم ${id} وملفاته السحابية بشكل نهائي`,
+        { candidateId: id, candidateName: candName }
+      );
+    } catch (error) {
+      console.error("Permanent candidate deletion failed:", error);
+      alert("تعذر إتمام الحذف السحابي بالكامل. لم يتم حذف السجل من الواجهة؛ يرجى المحاولة مرة أخرى.");
     }
-    deleteCandidateFromCloud(id);
-
-    logActivity(
-      "CANDIDATE_DELETED",
-      "CANDIDATE",
-      `حذف نهائي لمرشح: ${candName}`,
-      `تم حذف ملف المرشح (${candName}) برقم ${id} بشكل نهائي من قاعدة البيانات`,
-      { candidateId: id, candidateName: candName }
-    );
   };
 
   const handleBulkArchiveCandidates = async (ids: string[]) => {
@@ -801,18 +808,19 @@ export default function App() {
     }
   };
 
-  const handleBulkDeleteCandidates = (ids: string[]) => {
-    const idSet = new Set(ids);
-    setCandidates(prev => {
-      const next = prev.filter(c => !idSet.has(c.id));
-      try {
-        localStorage.setItem(STORAGE_KEYS.candidates, JSON.stringify(next));
-      } catch (e) {
-        console.warn("Failed to persist candidates to localStorage:", e);
+  const handleBulkDeleteCandidates = async (ids: string[]) => {
+    if (!ids.length) return;
+    const targets = candidates.filter(c => ids.includes(c.id));
+    try {
+      for (const candidate of targets) {
+        await deleteCandidateFromCloud(candidate.id, getCandidateStoragePaths(candidate));
       }
-      return next;
-    });
-    ids.forEach(id => deleteCandidateFromCloud(id));
+      const deletedIds = new Set(targets.map(c => c.id));
+      setCandidates(prev => prev.filter(c => !deletedIds.has(c.id)));
+    } catch (error) {
+      console.error("Bulk candidate deletion failed:", error);
+      alert("تعذر إتمام الحذف السحابي بالكامل. لم يتم حذف السجلات من الواجهة؛ يرجى المحاولة مرة أخرى.");
+    }
   };
 
   const handleAddGeneralExpense = (expense: Omit<GeneralExpense, "id">) => {
