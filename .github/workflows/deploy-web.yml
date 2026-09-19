@@ -75,6 +75,13 @@ jobs:
           gh issue create --title "Web deployment failed" --body "Firebase Hosting deployment verification failed for commit $GITHUB_SHA. Review the workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" || true
           exit 1
 
+      - name: 🚨 Report deployment failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create             --title "🚨 Web deployment failed — $GITHUB_SHA"             --body "The Firebase Hosting deployment failed for commit $GITHUB_SHA. Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Check the failed step and logs." || true
+
       - name: 🧹 Secure credential cleanup
         if: always()
         run: rm -f "$RUNNER_TEMP/firebase-service-account.json"
