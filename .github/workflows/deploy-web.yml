@@ -41,8 +41,21 @@ jobs:
             echo "❌ FIREBASE_SERVICE_ACCOUNT GitHub secret is not configured."
             exit 1
           }
+
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-service-account.json"
+
+          echo "🔎 Checking Firebase Hosting site..."
+          if npx --yes firebase-tools@latest hosting:sites:get crack-petal-506818-c8 --project crack-petal-506818-c8 --non-interactive >/tmp/hosting-site.json 2>/tmp/hosting-site-error.log; then
+            echo "✅ Hosting site already exists."
+            cat /tmp/hosting-site.json
+          else
+            echo "⚠️ Default Hosting site is missing. Creating it..."
+            cat /tmp/hosting-site-error.log || true
+            npx --yes firebase-tools@latest hosting:sites:create crack-petal-506818-c8 --project crack-petal-506818-c8 --non-interactive
+          fi
+
+          echo "🚀 Deploying web app..."
           npx --yes firebase-tools@latest deploy --only hosting --project crack-petal-506818-c8 --non-interactive
 
       - name: 🧹 Secure credential cleanup
