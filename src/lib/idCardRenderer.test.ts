@@ -104,6 +104,10 @@ describe("Candidate ID Card Renderer (CR80 Standard)", () => {
     assert.ok(!maliciousHtml.includes('<script>alert(1)</script>'));
     assert.ok(!maliciousHtml.includes('<img src=x onerror='));
     assert.ok(!maliciousHtml.includes('javascript:alert(1)'));
+    assert.ok(!generateFrontCardHtml({
+      ...sampleDoctorData,
+      photoUrl: 'data:image/svg+xml,<svg onload="alert(1)"></svg>'
+    }).includes('data:image/svg+xml'));
     assert.ok(maliciousHtml.includes('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;'));
     assert.ok(maliciousHtml.includes('&lt;svg onload=&quot;alert(1)&quot;&gt;'));
   });
