@@ -1,6 +1,9 @@
 name: 🌐 Deploy Working- Web App
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -36,7 +39,6 @@ jobs:
           set -euo pipefail
           test -n "$FIREBASE_SERVICE_ACCOUNT" || {
             echo "❌ FIREBASE_SERVICE_ACCOUNT GitHub secret is not configured."
-            echo "Add the Firebase service-account JSON as a GitHub Actions secret, then run this workflow again."
             exit 1
           }
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
