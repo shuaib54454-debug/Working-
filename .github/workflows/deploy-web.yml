@@ -40,10 +40,6 @@ jobs:
             exit 1
           }
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
-          npx --yes firebase-tools@latest deploy --only hosting --project crack-petal-506818-c8 --non-interactive --token "$(node -e 'const fs=require("fs"); const c=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/firebase-service-account.json","utf8")); process.stdout.write(c.private_key ? "service-account-json-present" : "");')" || true
-
-          # Firebase CLI token auth cannot consume service-account JSON directly.
-          # Use GOOGLE_APPLICATION_CREDENTIALS for service-account authentication.
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-service-account.json"
           npx --yes firebase-tools@latest deploy --only hosting --project crack-petal-506818-c8 --non-interactive
 
