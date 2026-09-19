@@ -708,7 +708,7 @@ export function generateFrontCardHtml(
           <div class="cr80-photo-frame">
             ${
               photoSrc
-                ? `<img src="${photoSrc}" class="cr80-photo-img" alt="${data.fullName}" onerror="this.outerHTML='${getDoctorFallbackAvatarSvg().replace(/"/g, "'")}'" />`
+                ? `<img src="${photoSrc}" class="cr80-photo-img" alt="${escapeHtml(data.fullName)}" />`
                 : getDoctorFallbackAvatarSvg()
             }
           </div>
