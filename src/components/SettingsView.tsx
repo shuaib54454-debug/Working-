@@ -25,13 +25,26 @@ import {
   KeyRound,
   UserCheck,
   Lock,
-  AlertCircle
+  AlertCircle,
+  Fingerprint,
+  Smartphone,
+  Key
 } from "lucide-react";
-import { AgencySettings, Candidate, GeneralExpense } from "../types";
+import { AgencySettings, Candidate, GeneralExpense, AppSecuritySettings } from "../types";
 import { INITIAL_CANDIDATES, INITIAL_EXPENSES, DEFAULT_SETTINGS } from "../data/initialData";
 import { exportCandidatesToCSV, exportFinanceToCSV, exportFullJSONBackup } from "../lib/exportUtils";
 import { useLanguage } from "../lib/LanguageContext";
 import { auth, logoutUser, changeCurrentUserPassword } from "../lib/firebase";
+import {
+  getSecuritySettings,
+  saveSecuritySettings,
+  checkBiometricSupport,
+  promptBiometricAuth,
+  setPinCode,
+  disableSecurityLock,
+  setAppLockedState,
+  verifyPinCode
+} from "../lib/biometricAuth";
 
 interface SettingsViewProps {
   settings: AgencySettings;
@@ -41,6 +54,7 @@ interface SettingsViewProps {
   onRestoreAllData: (data: { candidates: Candidate[]; generalExpenses: GeneralExpense[]; settings: AgencySettings }) => void;
   onResetToDemo: () => void;
   onOpenGoogleSheetsModal?: () => void;
+  onLockNow?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -50,12 +64,128 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onSaveSettings,
   onRestoreAllData,
   onResetToDemo,
-  onOpenGoogleSheetsModal
+  onOpenGoogleSheetsModal,
+  onLockNow
 }) => {
   const { t, language, setLanguage, isAr } = useLanguage();
   const [formData, setFormData] = useState<AgencySettings>({ ...settings });
   const [savedSuccess, setSavedSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Security Lock & Biometric State
+  const [securityConfig, setSecurityConfig] = useState<AppSecuritySettings>(() => getSecuritySettings());
+  const [biometricInfo, setBiometricInfo] = useState<{ available: boolean; biometryType: string; isNative: boolean }>({
+    available: false,
+    biometryType: "",
+    isNative: false
+  });
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [pinLengthChoice, setPinLengthChoice] = useState<4 | 6>(4);
+  const [pinModalError, setPinModalError] = useState<string | null>(null);
+  const [showDisablePinConfirm, setShowDisablePinConfirm] = useState(false);
+  const [currentPinToDisable, setCurrentPinToDisable] = useState("");
+  const [disablePinError, setDisablePinError] = useState<string | null>(null);
+  const [testBioResult, setTestBioResult] = useState<{ success?: boolean; message?: string } | null>(null);
+  const [isTestingBio, setIsTestingBio] = useState(false);
+
+  // Load biometric hardware support
+  React.useEffect(() => {
+    checkBiometricSupport().then(info => {
+      setBiometricInfo(info);
+    });
+  }, []);
+
+  const handleToggleSecurity = () => {
+    if (securityConfig.enabled) {
+      setShowDisablePinConfirm(true);
+      setCurrentPinToDisable("");
+      setDisablePinError(null);
+    } else {
+      setNewPin("");
+      setConfirmPin("");
+      setPinModalError(null);
+      setShowPinModal(true);
+    }
+  };
+
+  const handleSaveNewPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinModalError(null);
+    if (newPin.length !== pinLengthChoice) {
+      setPinModalError(isAr ? `يجب أن يتكون رمز PIN من ${pinLengthChoice} أرقام.` : `PIN must be ${pinLengthChoice} digits.`);
+      return;
+    }
+    if (!/^\d+$/.test(newPin)) {
+      setPinModalError(isAr ? "يجب أن يحتوي رمز PIN على أرقام فقط." : "PIN must contain digits only.");
+      return;
+    }
+    if (newPin !== confirmPin) {
+      setPinModalError(isAr ? "رمزا PIN غير متطابقين." : "PINs do not match.");
+      return;
+    }
+
+    setPinCode(newPin, securityConfig.biometricEnabled, securityConfig.autoLockMinutes);
+    const updated = getSecuritySettings();
+    setSecurityConfig(updated);
+    setShowPinModal(false);
+    setNewPin("");
+    setConfirmPin("");
+  };
+
+  const handleConfirmDisable = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!verifyPinCode(currentPinToDisable)) {
+      setDisablePinError(isAr ? "رمز PIN الحالي غير صحيح." : "Incorrect current PIN.");
+      return;
+    }
+    disableSecurityLock();
+    setSecurityConfig(getSecuritySettings());
+    setShowDisablePinConfirm(false);
+    setCurrentPinToDisable("");
+  };
+
+  const handleUpdateAutoLock = (mins: number) => {
+    const updated = { ...securityConfig, autoLockMinutes: mins };
+    saveSecuritySettings(updated);
+    setSecurityConfig(updated);
+  };
+
+  const handleToggleBiometric = () => {
+    const updated = { ...securityConfig, biometricEnabled: !securityConfig.biometricEnabled };
+    saveSecuritySettings(updated);
+    setSecurityConfig(updated);
+  };
+
+  const handleTestBiometric = async () => {
+    setIsTestingBio(true);
+    setTestBioResult(null);
+    try {
+      const res = await promptBiometricAuth(
+        isAr ? "اختبار حساس البصمة البيومترية لوكالة شُعيب" : "Test Shuayb Biometric Sensor"
+      );
+      if (res.success) {
+        setTestBioResult({
+          success: true,
+          message: isAr ? "تم التحقق من البصمة بنجاح تام! الحساس يعمل بدقة عالية." : "Biometric sensor verified successfully!"
+        });
+      } else {
+        setTestBioResult({
+          success: false,
+          message: res.error || (isAr ? "تعذر التحقق من البصمة" : "Biometric check failed")
+        });
+      }
+    } catch (err: any) {
+      setTestBioResult({
+        success: false,
+        message: err?.message || (isAr ? "حدث خطأ أثناء فحص البصمة" : "Error testing biometric")
+      });
+    } finally {
+      setIsTestingBio(false);
+      setTimeout(() => setTestBioResult(null), 4000);
+    }
+  };
 
   // Password change state
   const [showPasswordChange, setShowPasswordChange] = useState(false);
@@ -537,6 +667,173 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </div>
 
+          {/* Biometric Auth & PIN Security Card */}
+          <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-base text-[#172a46] flex items-center gap-2">
+                <Fingerprint className="w-5 h-5 text-[#c9a84c]" />
+                <span>{isAr ? "قفل الأمان وبصمة الإصبع (Biometric & PIN)" : "Biometric & PIN Security"}</span>
+              </h3>
+              <span
+                className={`text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1 border ${
+                  securityConfig.enabled
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-stone-100 text-stone-500 border-stone-200"
+                }`}
+              >
+                {securityConfig.enabled ? (
+                  <>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    <span>{isAr ? "مفعّل ومحمي" : "Protected"}</span>
+                  </>
+                ) : (
+                  <span>{isAr ? "غير مفعّل" : "Disabled"}</span>
+                )}
+              </span>
+            </div>
+
+            <p className="text-xs text-stone-500 leading-relaxed">
+              {isAr
+                ? "حماية خصوصية بيانات المرشحين والمستندات بطلب بصمة الإصبع (Capacitor Biometric Auth) أو رمز PIN عند فتح التطبيق أو تركه في الخلفية."
+                : "Protect candidate files and privacy with Capacitor Biometric Auth or secure PIN code on app launch."}
+            </p>
+
+            {/* Hardware Sensor Status */}
+            <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-stone-500 text-[11px] flex items-center gap-1">
+                  <Smartphone className="w-3.5 h-3.5 text-[#c9a84c]" />
+                  <span>{isAr ? "حساس البصمة بالجهاز:" : "Biometric Sensor:"}</span>
+                </span>
+                <span className={`font-bold text-[11px] ${biometricInfo.available ? "text-emerald-700" : "text-amber-700"}`}>
+                  {biometricInfo.available ? biometricInfo.biometryType : (isAr ? "غير متاح (PIN متاح)" : "Not Available")}
+                </span>
+              </div>
+
+              {biometricInfo.available && (
+                <div className="pt-1 flex items-center justify-between">
+                  <span className="text-stone-500 text-[11px]">
+                    {isAr ? "اختبار استجابة البصمة:" : "Test Sensor:"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleTestBiometric}
+                    disabled={isTestingBio}
+                    className="px-2.5 py-1 bg-white hover:bg-stone-100 text-[#172a46] border border-stone-200 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95"
+                  >
+                    <Fingerprint className="w-3 h-3 text-[#c9a84c]" />
+                    <span>{isTestingBio ? (isAr ? "جاري الاختبار..." : "Testing...") : (isAr ? "اختبار البصمة الآن" : "Test Biometric")}</span>
+                  </button>
+                </div>
+              )}
+
+              {testBioResult && (
+                <div
+                  className={`p-2 rounded-xl text-[11px] font-bold flex items-center gap-1.5 ${
+                    testBioResult.success
+                      ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                      : "bg-rose-50 text-rose-800 border border-rose-200"
+                  }`}
+                >
+                  {testBioResult.success ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                  )}
+                  <span>{testBioResult.message}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Toggle Security Enable/Disable Button */}
+            <div className="space-y-3 pt-1">
+              <button
+                type="button"
+                onClick={handleToggleSecurity}
+                className={`w-full py-2.5 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-95 shadow-xs ${
+                  securityConfig.enabled
+                    ? "bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200"
+                    : "bg-[#172a46] hover:bg-[#203a60] text-[#c9a84c] border border-[#c9a84c]/30"
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>
+                  {securityConfig.enabled
+                    ? (isAr ? "تعطيل قفل الأمان ورمز PIN" : "Disable Security Lock")
+                    : (isAr ? "تفعيل قفل الأمان وتعيين رمز PIN" : "Enable PIN & Biometric Lock")}
+                </span>
+              </button>
+
+              {securityConfig.enabled && (
+                <div className="space-y-3 pt-2 border-t border-stone-100 animate-in fade-in">
+                  {/* Biometric toggle if hardware available */}
+                  {biometricInfo.available && (
+                    <div className="flex items-center justify-between p-2.5 bg-stone-50 rounded-2xl border border-stone-200 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Fingerprint className="w-4 h-4 text-[#c9a84c]" />
+                        <span className="font-bold text-stone-800">
+                          {isAr ? "طلب البصمة تلقائياً" : "Auto Biometric Prompt"}
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={securityConfig.biometricEnabled}
+                        onChange={handleToggleBiometric}
+                        className="w-4 h-4 accent-[#c9a84c] rounded cursor-pointer"
+                      />
+                    </div>
+                  )}
+
+                  {/* Auto Lock Delay Selector */}
+                  <div className="p-2.5 bg-stone-50 rounded-2xl border border-stone-200 text-xs space-y-1">
+                    <label className="block font-bold text-stone-700">
+                      {isAr ? "القفل التلقائي عند عدم النشاط:" : "Auto-Lock Inactivity:"}
+                    </label>
+                    <select
+                      value={securityConfig.autoLockMinutes}
+                      onChange={(e) => handleUpdateAutoLock(Number(e.target.value))}
+                      className="w-full p-2 bg-white border border-stone-200 rounded-xl text-xs font-bold text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
+                    >
+                      <option value={0}>{isAr ? "فوراً عند مغادرة التطبيق أو تصغيره" : "Immediately on leave/minimize"}</option>
+                      <option value={1}>{isAr ? "بعد دقيقة واحدة (1 دقيقة)" : "After 1 minute"}</option>
+                      <option value={5}>{isAr ? "بعد 5 دقائق (مستحسن)" : "After 5 minutes (Recommended)"}</option>
+                      <option value={15}>{isAr ? "بعد 15 دقيقة" : "After 15 minutes"}</option>
+                      <option value={30}>{isAr ? "بعد 30 دقيقة" : "After 30 minutes"}</option>
+                    </select>
+                  </div>
+
+                  {/* Change PIN button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewPin("");
+                      setConfirmPin("");
+                      setPinModalError(null);
+                      setShowPinModal(true);
+                    }}
+                    className="w-full py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Key className="w-3.5 h-3.5 text-[#c9a84c]" />
+                    <span>{isAr ? "تغيير رمز PIN الحالي" : "Change PIN Code"}</span>
+                  </button>
+
+                  {/* Immediate Lock App Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppLockedState(true);
+                      if (onLockNow) onLockNow();
+                    }}
+                    className="w-full py-2.5 bg-[#c9a84c] hover:bg-[#d8b759] text-[#172a46] rounded-2xl text-xs font-black flex items-center justify-center gap-2 shadow-xs transition-all active:scale-95"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>{isAr ? "🔒 قفل التطبيق فوراً الآن" : "Lock App Right Now"}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Cloud Database (Firebase Firestore) Card */}
           <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
@@ -654,6 +951,193 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* PIN Setup Modal */}
+      {showPinModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl border border-stone-200 shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-[#172a46] text-[#c9a84c] flex items-center justify-center">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-[#172a46]">
+                    {isAr ? "تعيين رمز PIN للأمان" : "Set Security PIN"}
+                  </h4>
+                  <p className="text-[11px] text-stone-500 font-bold">
+                    {isAr ? "لحماية بيانات المرشحين والخصوصية" : "Protect candidate records"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPinModal(false)}
+                className="text-stone-400 hover:text-stone-600 p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* PIN length choice */}
+            <div className="flex items-center justify-center gap-2 bg-stone-100 p-1 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setPinLengthChoice(4);
+                  setNewPin("");
+                  setConfirmPin("");
+                }}
+                className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  pinLengthChoice === 4
+                    ? "bg-white text-[#172a46] shadow-xs font-black"
+                    : "text-stone-500"
+                }`}
+              >
+                {isAr ? "4 أرقام (سريع)" : "4 Digits"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPinLengthChoice(6);
+                  setNewPin("");
+                  setConfirmPin("");
+                }}
+                className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  pinLengthChoice === 6
+                    ? "bg-white text-[#172a46] shadow-xs font-black"
+                    : "text-stone-500"
+                }`}
+              >
+                {isAr ? "6 أرقام (أمان فائق)" : "6 Digits (Max Security)"}
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveNewPin} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  {isAr ? `أدخل رمز PIN الجديد (${pinLengthChoice} أرقام):` : `Enter new PIN (${pinLengthChoice} digits):`}
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={pinLengthChoice}
+                  required
+                  autoFocus
+                  value={newPin}
+                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, pinLengthChoice))}
+                  placeholder="••••"
+                  className="w-full text-center tracking-[0.5em] text-lg font-mono p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  {isAr ? "تأكيد رمز PIN:" : "Confirm PIN:"}
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={pinLengthChoice}
+                  required
+                  value={confirmPin}
+                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, pinLengthChoice))}
+                  placeholder="••••"
+                  className="w-full text-center tracking-[0.5em] text-lg font-mono p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-stone-800 outline-none focus:ring-2 focus:ring-[#c9a84c]"
+                />
+              </div>
+
+              {pinModalError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold text-rose-700 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{pinModalError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPinModal(false)}
+                  className="flex-1 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-2xl text-xs font-bold transition-colors"
+                >
+                  {isAr ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-[#172a46] hover:bg-[#203a60] text-[#c9a84c] rounded-2xl text-xs font-black transition-colors shadow-sm"
+                >
+                  {isAr ? "حفظ وتفعيل" : "Save & Enable"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Disable PIN Confirmation Modal */}
+      {showDisablePinConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl border border-stone-200 shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center gap-2 border-b border-stone-100 pb-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-black text-sm text-stone-900">
+                  {isAr ? "تأكيد تعطيل قفل الأمان" : "Confirm Disable Lock"}
+                </h4>
+                <p className="text-[11px] text-stone-500 font-bold">
+                  {isAr ? "أدخل رمز PIN الحالي للمتابعة" : "Enter current PIN to proceed"}
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmDisable} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  {isAr ? "رمز PIN الحالي:" : "Current PIN:"}
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  required
+                  autoFocus
+                  value={currentPinToDisable}
+                  onChange={(e) => setCurrentPinToDisable(e.target.value.replace(/\D/g, ""))}
+                  placeholder="••••"
+                  className="w-full text-center tracking-[0.5em] text-lg font-mono p-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-stone-800 outline-none focus:ring-2 focus:ring-rose-500"
+                />
+              </div>
+
+              {disablePinError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold text-rose-700 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{disablePinError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDisablePinConfirm(false)}
+                  className="flex-1 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-2xl text-xs font-bold transition-colors"
+                >
+                  {isAr ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl text-xs font-black transition-colors"
+                >
+                  {isAr ? "تأكيد التعطيل" : "Disable Lock"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

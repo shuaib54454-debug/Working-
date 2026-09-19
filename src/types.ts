@@ -153,6 +153,14 @@ export interface AgencySettings {
   licenseNumber?: string;
 }
 
+export interface AppSecuritySettings {
+  enabled: boolean;
+  pinCode?: string;
+  biometricEnabled: boolean;
+  autoLockMinutes: number;
+  lastActiveTimestamp?: number;
+}
+
 export interface FinanceSummary {
   fees: number;
   agencyLiability: number;

@@ -26,7 +26,8 @@ import {
   Cloud,
   Layers,
   Calendar,
-  Activity
+  Activity,
+  Lock
 } from "lucide-react";
 import { ActiveView, AgencySettings } from "../types";
 import { useLanguage } from "../lib/LanguageContext";
@@ -42,6 +43,8 @@ export interface NavigationProps {
   onOpenPassportScanner?: () => void;
   onOpenExportModal?: () => void;
   onOpenInstallModal?: () => void;
+  isSecurityLockEnabled?: boolean;
+  onLockNow?: () => void;
   settings: AgencySettings;
   candidateCount: number;
   alertCount: number;
@@ -62,6 +65,8 @@ export const TopBar: React.FC<
   onOpenPassportScanner,
   onOpenExportModal,
   onOpenInstallModal,
+  isSecurityLockEnabled,
+  onLockNow,
   settings,
   candidateCount,
   alertCount,
@@ -234,6 +239,20 @@ export const TopBar: React.FC<
             >
               <Scan className="w-4 h-4 shrink-0" />
               <span className="hidden md:inline">{t.passportScan}</span>
+            </button>
+          )}
+
+          {/* Quick Lock Button (When Security PIN/Biometric is enabled) */}
+          {isSecurityLockEnabled && onLockNow && (
+            <button
+              onClick={onLockNow}
+              title={isAr ? "قفل التطبيق وحماية الخصوصية (بصمة / PIN)" : "Lock App (Biometric / PIN)"}
+              className="p-2 bg-white/10 hover:bg-white/20 text-[#c9a84c] border border-white/10 rounded-2xl transition-all active:scale-95 shrink-0 flex items-center gap-1"
+            >
+              <Lock className="w-4 h-4 shrink-0" />
+              <span className="hidden xl:inline text-[11px] font-bold text-stone-200">
+                {isAr ? "قفل" : "Lock"}
+              </span>
             </button>
           )}
 
@@ -599,6 +618,8 @@ export const MobileDrawer: React.FC<{
   onOpenGoogleCalendarModal?: () => void;
   onOpenExportModal?: () => void;
   onOpenInstallModal?: () => void;
+  isSecurityLockEnabled?: boolean;
+  onLockNow?: () => void;
 }> = ({
   isOpen,
   onClose,
@@ -611,7 +632,9 @@ export const MobileDrawer: React.FC<{
   onOpenGoogleSheetsModal,
   onOpenGoogleCalendarModal,
   onOpenExportModal,
-  onOpenInstallModal
+  onOpenInstallModal,
+  isSecurityLockEnabled,
+  onLockNow
 }) => {
   const { t, language, toggleLanguage, isAr } = useLanguage();
   const ArrowIcon = isAr ? ChevronLeft : ChevronRight;
@@ -849,6 +872,25 @@ export const MobileDrawer: React.FC<{
 
         {/* Bottom Drawer Actions */}
         <div className="pt-4 border-t border-white/10 space-y-2">
+          {/* Quick Lock Application */}
+          {isSecurityLockEnabled && onLockNow && (
+            <button
+              onClick={() => {
+                onClose();
+                onLockNow();
+              }}
+              className="w-full flex items-center justify-between p-2.5 bg-[#c9a84c]/20 hover:bg-[#c9a84c]/30 text-[#c9a84c] border border-[#c9a84c]/30 rounded-2xl text-xs font-black transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4" />
+                <span>{isAr ? "قفل التطبيق (بصمة / PIN)" : "Lock App (Biometric / PIN)"}</span>
+              </div>
+              <span className="text-[10px] bg-[#c9a84c] text-[#172a46] px-1.5 py-0.5 rounded-md font-black">
+                {isAr ? "أمان" : "Secure"}
+              </span>
+            </button>
+          )}
+
           {/* Language Switch */}
           <button
             onClick={toggleLanguage}
