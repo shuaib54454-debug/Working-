@@ -93,6 +93,21 @@ describe("Candidate ID Card Renderer (CR80 Standard)", () => {
     assert.ok(incompleteHtml.includes("cr80-badge-danger"));
   });
 
+  it("escapes user-controlled HTML and rejects unsafe image URLs", () => {
+    const maliciousHtml = generateFrontCardHtml({
+      ...sampleDoctorData,
+      fullName: '<img src=x onerror="alert(1)">',
+      jobTitle: '"><script>alert(1)</script>',
+      photoUrl: 'javascript:alert(1)',
+      organizationName: '<svg onload="alert(1)">'
+    });
+    assert.ok(!maliciousHtml.includes('<script>alert(1)</script>'));
+    assert.ok(!maliciousHtml.includes('<img src=x onerror='));
+    assert.ok(!maliciousHtml.includes('javascript:alert(1)'));
+    assert.ok(maliciousHtml.includes('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;'));
+    assert.ok(maliciousHtml.includes('&lt;svg onload=&quot;alert(1)&quot;&gt;'));
+  });
+
   it("renderIdCard injects standard CR80 styles and container into DOM element", () => {
     // Mock DOM root
     const mockElement = { innerHTML: "" } as unknown as HTMLElement;
