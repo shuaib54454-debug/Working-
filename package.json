@@ -56,5 +56,8 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "0.9.12"
   }
 }
