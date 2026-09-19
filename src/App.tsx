@@ -844,22 +844,23 @@ export default function App() {
     );
   };
 
-  const handleDeleteGeneralExpense = (id: string | number) => {
+  const handleDeleteGeneralExpense = async (id: string | number) => {
     const stringId = String(id);
     const target = generalExpenses.find(e => String(e.id) === stringId);
-    setGeneralExpenses(prev => prev.filter(e => String(e.id) !== stringId));
-    deleteExpenseFromCloud(stringId);
-
-    if (target) {
+    if (!target) return;
+    try {
+      await deleteExpenseFromCloud(stringId);
+      setGeneralExpenses(prev => prev.filter(e => String(e.id) !== stringId));
       logActivity(
         "EXPENSE_GENERAL_DELETED",
         "EXPENSE",
         `حذف مصروف عام: ${target.title}`,
         `تم إلغاء أو حذف المصروف العام المسجل بقيمة ${target.amount} (${target.category})`,
-        {
-          amount: target.amount
-        }
+        { amount: target.amount }
       );
+    } catch (error) {
+      console.error("General expense deletion failed:", error);
+      alert("تعذر حذف المصروف من قاعدة البيانات. لم يتم حذفه من الواجهة؛ يرجى المحاولة مرة أخرى.");
     }
   };
 
