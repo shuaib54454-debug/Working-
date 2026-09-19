@@ -1,0 +1,26 @@
+name: Refresh Dependency Lock (temporary)
+on:
+  push:
+    branches: [main]
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --package-lock-only --legacy-peer-deps
+      - name: Commit lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet package-lock.json; then
+            echo "No lockfile changes."
+            exit 0
+          fi
+          git add package-lock.json
+          git commit -m "chore: refresh dependency lockfile"
+          git push
