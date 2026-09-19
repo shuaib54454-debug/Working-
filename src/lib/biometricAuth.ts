@@ -81,22 +81,18 @@ export async function checkBiometricSupport(): Promise<{
     console.warn("Native biometric check warning/bypass:", nativeErr);
   }
 
-  // 2. Web fallback: WebAuthn / Platform Authenticator (Windows Hello, Touch ID on Mac, Android Chrome Fingerprint)
-  if (typeof window !== "undefined" && window.PublicKeyCredential) {
-    try {
-      const isWebAuthnAvailable = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-      if (isWebAuthnAvailable) {
-        return {
-          available: true,
-          biometryType: "بصمة المتصفح / التعرف البيومتري (WebAuthn)",
-          isNative: false,
-          details: "WebAuthn Platform Authenticator"
-        };
-      }
-    } catch (webErr) {
-      console.warn("WebAuthn check error:", webErr);
-    }
+  // WebAuthn requires a registered credential and a real assertion ceremony.
+  // This app does not maintain a WebAuthn credential store, so never report a
+  // browser authenticator as successful without a cryptographic assertion.
+  if (!isNative) {
+    return {
+      available: false,
+      biometryType: "غير متاح في نسخة الويب",
+      isNative: false,
+      details: "Web biometric authentication is disabled until a real WebAuthn registration/assertion flow is configured."
+    };
   }
+
 
   return {
     available: false,
@@ -134,23 +130,15 @@ export async function promptBiometricAuth(
     }
   }
 
-  // 2. Web WebAuthn biometric simulation / assertion
-  if (typeof window !== "undefined" && window.PublicKeyCredential) {
-    try {
-      const isAvailable = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-      if (isAvailable) {
-        // Create a random challenge for quick user verification
-        const challenge = new Uint8Array(32);
-        window.crypto.getRandomValues(challenge);
-
-        // We can request credentials with userVerification required
-        // In preview if origin doesn't match RP, fallback gracefully
-        return { success: true };
-      }
-    } catch (err: any) {
-      console.warn("WebAuthn prompt error:", err);
-    }
+  // Do not simulate WebAuthn. Without a registered credential and
+  // navigator.credentials.get() assertion, success would be a security bypass.
+  if (!Capacitor.isNativePlatform()) {
+    return {
+      success: false,
+      error: "التحقق البيومتري عبر الويب غير مفعّل حالياً. استخدم PIN أو تطبيق Android الأصلي."
+    };
   }
+
 
   return {
     success: false,
