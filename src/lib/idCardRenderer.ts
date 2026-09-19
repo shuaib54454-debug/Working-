@@ -30,7 +30,10 @@ function escapeHtml(value: unknown): string {
 function safeImageUrl(value: unknown): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
-  if (/^(https?:\/\/|blob:|data:image\/)/i.test(raw)) return raw;
+  // Only allow remote/blob images and non-scriptable raster data URLs.
+  // SVG data URLs are intentionally rejected because they can carry active markup.
+  if (/^(https?:\/\/|blob:)/i.test(raw)) return raw;
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(raw)) return raw;
   return "";
 }
 
