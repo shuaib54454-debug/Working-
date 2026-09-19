@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   deploy:
@@ -46,7 +47,7 @@ jobs:
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-service-account.json"
 
           echo "🔎 Checking default Firebase Hosting site..."
-          if ! npx --yes firebase-tools@latest hosting:sites:get crack-petal-506818-c8 --project crack-petal-506818-c8 --non-interactive >/tmp/hosting-site.json 2>/tmp/hosting-site-error.log; then
+          if ! npx --yes firebase-tools@latest hosting:sites:list --project crack-petal-506818-c8 --json > /tmp/hosting-sites.json 2>/tmp/hosting-site-error.log || ! grep -q '"name": "projects/crack-petal-506818-c8/sites/crack-petal-506818-c8"' /tmp/hosting-sites.json; then
             echo "⚠️ Default Hosting site is missing. Creating it now..."
             cat /tmp/hosting-site-error.log || true
             npx --yes firebase-tools@latest hosting:sites:create crack-petal-506818-c8 --project crack-petal-506818-c8 --non-interactive
@@ -71,6 +72,7 @@ jobs:
 
           echo "❌ Hosting deployment verification failed."
           head -c 2000 /tmp/working-home.html || true
+          gh issue create --title "Web deployment failed" --body "Firebase Hosting deployment verification failed for commit $GITHUB_SHA. Review the workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" || true
           exit 1
 
       - name: 🧹 Secure credential cleanup
