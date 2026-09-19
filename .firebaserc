@@ -1,5 +1,4 @@
 {
-  "projects": {
-    "default": "crack-petal-506818-c8"
-  }
+  "projects": {"default": "crack-petal-506818-c8"},
+  "targets": {"crack-petal-506818-c8": {"hosting": {"working": ["crack-petal-506818-c8"]}}}
 }
