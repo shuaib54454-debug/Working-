@@ -74,9 +74,20 @@ export async function syncCandidateToCloud(candidate: Candidate, ownerUid?: stri
     throw e;
   }
 }
-export async function deleteCandidateFromCloud(candidateId: string): Promise<void> {
+export async function deleteCandidateFromCloud(candidateId: string, storagePaths: string[] = []): Promise<void> {
   if (!auth.currentUser) throw new Error("Authentication required");
+  const uniquePaths = [...new Set(storagePaths.filter(Boolean))];
   try {
+    // Delete linked Storage objects first. If this fails, keep the Firestore record intact
+    // so the user can retry instead of silently creating an orphaned/partial deletion.
+    for (const storagePath of uniquePaths) {
+      try {
+        await withDbRetry(() => deleteObject(storageRef(storage, storagePath)));
+      } catch (storageError: any) {
+        const code = storageError?.code || "";
+        if (code !== "storage/object-not-found") throw storageError;
+      }
+    }
     await withDbRetry(() => deleteDoc(doc(db, "candidates", candidateId)));
   } catch (e) {
     handleFirestoreError(e, OperationType.DELETE, `candidates/${candidateId}`);
