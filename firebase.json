@@ -1,44 +1,16 @@
 {
   "hosting": {
+    "target": "working",
     "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [{"source": "**", "destination": "/index.html"}],
     "cleanUrls": true,
-    "headers": [
-      {
-        "source": "**/*.@(js|css|png|jpg|jpeg|gif|webp|svg|ico|woff|woff2)",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "public,max-age=31536000,immutable"
-          }
-        ]
-      }
-    ]
+    "headers": [{
+      "source": "**/*.@(js|css|png|jpg|jpeg|gif|webp|svg|ico|woff|woff2)",
+      "headers": [{"key": "Cache-Control", "value": "public,max-age=31536000,immutable"}]
+    }]
   },
-  "firestore": {
-    "rules": "firestore.rules",
-    "port": 8080
-  },
-  "storage": {
-    "rules": "storage.rules",
-    "port": 9199
-  },
-  "emulators": {
-    "firestore": {
-      "port": 8080
-    },
-    "storage": {
-      "port": 9199
-    }
-  }
+  "firestore": {"rules": "firestore.rules", "port": 8080},
+  "storage": {"rules": "storage.rules", "port": 9199},
+  "emulators": {"firestore": {"port": 8080}, "storage": {"port": 9199}}
 }
