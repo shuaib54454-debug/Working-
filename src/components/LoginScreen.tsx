@@ -26,7 +26,7 @@ interface LoginScreenProps {
   onSuccess: () => void;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess, onContinueLocal }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({ onSuccess }) => {
   const { isAr, toggleLanguage } = useLanguage();
   const [mode, setMode] = useState<"login" | "register" | "forgot">("login");
   const [email, setEmail] = useState(OWNER_EMAIL);
