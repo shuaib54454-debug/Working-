@@ -39,38 +39,14 @@ export async function logoutUser(): Promise<void> {
 }
 export async function resetUserPassword(email: string): Promise<void> { assertOwnerEmail(email); return withDbRetry(async () => { await sendPasswordResetEmail(auth, email.trim()); }); }
 export async function changeCurrentUserPassword(newPassword: string): Promise<void> { const user = auth.currentUser; if (!user) throw new Error("No authenticated user"); assertOwnerEmail(user.email || ""); return withDbRetry(async () => { await firebaseUpdatePassword(user, newPassword); }); }
-export function setLocalUser(user: AppUser | null): void {
-  if (typeof window !== "undefined") {
-    if (user) {
-      sessionStorage.removeItem("shuayb_explicit_logout");
-      localStorage.setItem("shuayb_local_user", JSON.stringify(user));
-    } else {
-      localStorage.removeItem("shuayb_local_user");
-    }
-  }
-  if (localUserListener && !auth.currentUser) {
-    localUserListener(user);
-  }
+export function setLocalUser(_user: AppUser | null): void {
+  // Local authentication is intentionally disabled. Firebase Auth is the only trust source.
+  if (typeof window !== "undefined") localStorage.removeItem("shuayb_local_user");
 }
 export function subscribeToAuth(callback: (user: User | AppUser | null) => void): Unsubscribe {
   localUserListener = callback;
   const unsub = onAuthStateChanged(auth, async firebaseUser => {
     if (!firebaseUser) {
-      if (typeof window !== "undefined") {
-        try {
-          const explicitLogout = sessionStorage.getItem("shuayb_explicit_logout");
-          if (explicitLogout !== "true") {
-            const localRaw = localStorage.getItem("shuayb_local_user");
-            if (localRaw) {
-              const parsed = JSON.parse(localRaw);
-              if (parsed && parsed.uid) {
-                callback(parsed);
-                return;
-              }
-            }
-          }
-        } catch {}
-      }
       callback(null);
       return;
     }
@@ -88,14 +64,48 @@ export function subscribeToAuth(callback: (user: User | AppUser | null) => void)
 }
 export async function testFirebaseConnection(): Promise<boolean> { try { if (!auth.currentUser) return false; await getDocFromServer(doc(db, "_system", "connection_check")); return true; } catch (error: any) { const errorMsg = error?.message || ""; if (errorMsg.includes("offline") || errorMsg.includes("unavailable") || errorMsg.includes("Database is closing")) console.warn("Firebase is temporarily unavailable"); return false; } }
 export function subscribeToCandidates(ownerUid: string, onUpdate: (candidates: Candidate[]) => void, onError?: (err: Error) => void): Unsubscribe { const q = query(collection(db, "candidates"), where("ownerUid", "==", ownerUid)); return onSnapshot(q, snapshot => { const list: Candidate[] = []; snapshot.forEach(d => list.push(d.data() as Candidate)); onUpdate(list); }, error => { handleFirestoreError(error, OperationType.LIST, "candidates"); onError?.(error); }); }
-export async function syncCandidateToCloud(candidate: Candidate, ownerUid?: string): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid) return; try { await withDbRetry(() => setDoc(doc(db, "candidates", candidate.id), { ...candidate, ownerUid: uid }, { merge: true })); } catch (e) { handleFirestoreError(e, OperationType.WRITE, `candidates/${candidate.id}`); } }
-export async function deleteCandidateFromCloud(candidateId: string): Promise<void> { if (!auth.currentUser) return; try { await withDbRetry(() => deleteDoc(doc(db, "candidates", candidateId))); } catch (e) { handleFirestoreError(e, OperationType.DELETE, `candidates/${candidateId}`); } }
-export async function syncAllCandidatesBatch(candidates: Candidate[], ownerUid?: string): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid || candidates.length === 0) return; try { await withDbRetry(async () => { const batch = writeBatch(db); candidates.forEach(c => batch.set(doc(db, "candidates", c.id), { ...c, ownerUid: uid }, { merge: true })); await batch.commit(); }); } catch (e) { handleFirestoreError(e, OperationType.WRITE, "candidates/batch"); } }
+export async function syncCandidateToCloud(candidate: Candidate, ownerUid?: string): Promise<void> {
+  const uid = ownerUid || auth.currentUser?.uid;
+  if (!auth.currentUser || !uid) return;
+  try {
+    await withDbRetry(() => setDoc(doc(db, "candidates", candidate.id), { ...candidate, ownerUid: uid }, { merge: true }));
+  } catch (e) {
+    handleFirestoreError(e, OperationType.WRITE, `candidates/${candidate.id}`);
+    throw e;
+  }
+}
+export async function deleteCandidateFromCloud(candidateId: string): Promise<void> {
+  if (!auth.currentUser) throw new Error("Authentication required");
+  try {
+    await withDbRetry(() => deleteDoc(doc(db, "candidates", candidateId)));
+  } catch (e) {
+    handleFirestoreError(e, OperationType.DELETE, `candidates/${candidateId}`);
+    throw e;
+  }
+}
 export async function bulkArchiveCandidatesInCloud(candidateIds: string[], ownerUid?: string, candidatesData?: Candidate[]): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid || candidateIds.length === 0) return; try { await withDbRetry(async () => { const batch = writeBatch(db); const nowIso = new Date().toISOString(); const map = new Map((candidatesData || []).map(c => [c.id, c])); candidateIds.forEach(id => batch.set(doc(db, "candidates", id), { ...(map.get(id) || {}), archived: true, ownerUid: uid, updatedAt: nowIso }, { merge: true })); await batch.commit(); }); } catch (e) { handleFirestoreError(e, OperationType.WRITE, "candidates/bulkArchive"); throw e; } }
 export async function bulkRestoreCandidatesInCloud(candidateIds: string[], ownerUid?: string, candidatesData?: Candidate[]): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid || candidateIds.length === 0) return; try { await withDbRetry(async () => { const batch = writeBatch(db); const nowIso = new Date().toISOString(); const map = new Map((candidatesData || []).map(c => [c.id, c])); candidateIds.forEach(id => batch.set(doc(db, "candidates", id), { ...(map.get(id) || {}), archived: false, ownerUid: uid, updatedAt: nowIso }, { merge: true })); await batch.commit(); }); } catch (e) { handleFirestoreError(e, OperationType.WRITE, "candidates/bulkRestore"); throw e; } }
 export function subscribeToExpenses(ownerUid: string, onUpdate: (expenses: GeneralExpense[]) => void, onError?: (err: Error) => void): Unsubscribe { const q = query(collection(db, "expenses"), where("ownerUid", "==", ownerUid)); return onSnapshot(q, snapshot => { const list: GeneralExpense[] = []; snapshot.forEach(d => list.push(d.data() as GeneralExpense)); onUpdate(list); }, error => { handleFirestoreError(error, OperationType.LIST, "expenses"); onError?.(error); }); }
-export async function syncExpenseToCloud(expense: GeneralExpense, ownerUid?: string): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid) return; try { await withDbRetry(() => setDoc(doc(db, "expenses", String(expense.id)), { ...expense, ownerUid: uid }, { merge: true })); } catch (e) { handleFirestoreError(e, OperationType.WRITE, `expenses/${expense.id}`); } }
-export async function deleteExpenseFromCloud(id: string): Promise<void> { if (!auth.currentUser) return; try { await withDbRetry(() => deleteDoc(doc(db, "expenses", id))); } catch (e) { handleFirestoreError(e, OperationType.DELETE, `expenses/${id}`); } }
+export async function syncExpenseToCloud(expense: GeneralExpense, ownerUid?: string): Promise<void> {
+  const uid = ownerUid || auth.currentUser?.uid;
+  if (!auth.currentUser || !uid) return;
+  try {
+    await withDbRetry(() => setDoc(doc(db, "expenses", String(expense.id)), { ...expense, ownerUid: uid }, { merge: true }));
+  } catch (e) {
+    handleFirestoreError(e, OperationType.WRITE, `expenses/${expense.id}`);
+    throw e;
+  }
+}
+export async function deleteExpenseFromCloud(id: string): Promise<void> {
+  if (!auth.currentUser) throw new Error("Authentication required");
+  try {
+    await withDbRetry(() => deleteDoc(doc(db, "expenses", String(id))));
+  } catch (e) {
+    handleFirestoreError(e, OperationType.DELETE, `expenses/${id}`);
+    throw e;
+  }
+}
+export async function(id: string): Promise<void> { if (!auth.currentUser) return; try { await withDbRetry(() => deleteDoc(doc(db, "expenses", id))); } catch (e) { handleFirestoreError(e, OperationType.DELETE, `expenses/${id}`); } }
 export async function syncAllExpensesBatch(expenses: GeneralExpense[], ownerUid?: string): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid || expenses.length === 0) return; try { await withDbRetry(async () => { const batch = writeBatch(db); expenses.forEach(e => batch.set(doc(db, "expenses", String(e.id)), { ...e, ownerUid: uid }, { merge: true })); await batch.commit(); }); } catch (e) { handleFirestoreError(e, OperationType.WRITE, "expenses/batch"); } }
 export function subscribeToSettings(ownerUid: string, onUpdate: (settings: AgencySettings | null) => void, onError?: (err: Error) => void): Unsubscribe { const ref = doc(db, "settings", ownerUid); return onSnapshot(ref, d => onUpdate(d.exists() ? d.data() as AgencySettings : null), error => { handleFirestoreError(error, OperationType.GET, `settings/${ownerUid}`); onError?.(error); }); }
 export async function syncSettingsToCloud(settings: AgencySettings, ownerUid?: string): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid) return; try { await withDbRetry(() => setDoc(doc(db, "settings", uid), { ...settings, ownerUid: uid }, { merge: true })); } catch (e) { handleFirestoreError(e, OperationType.WRITE, `settings/${uid}`); } }
