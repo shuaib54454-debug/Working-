@@ -94,6 +94,24 @@ export async function deleteCandidateFromCloud(candidateId: string, storagePaths
     throw e;
   }
 }
+export async function syncAllCandidatesBatch(candidates: Candidate[], ownerUid?: string): Promise<void> {
+  const uid = ownerUid || auth.currentUser?.uid;
+  if (!auth.currentUser || !uid || candidates.length === 0) return;
+  try {
+    await withDbRetry(async () => {
+      for (let i = 0; i < candidates.length; i += 450) {
+        const batch = writeBatch(db);
+        candidates.slice(i, i + 450).forEach(candidate =>
+          batch.set(doc(db, "candidates", candidate.id), { ...candidate, ownerUid: uid }, { merge: true })
+        );
+        await batch.commit();
+      }
+    });
+  } catch (e) {
+    handleFirestoreError(e, OperationType.WRITE, "candidates/batch");
+    throw e;
+  }
+}
 export async function bulkArchiveCandidatesInCloud(candidateIds: string[], ownerUid?: string, candidatesData?: Candidate[]): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid || candidateIds.length === 0) return; try { await withDbRetry(async () => { const batch = writeBatch(db); const nowIso = new Date().toISOString(); const map = new Map((candidatesData || []).map(c => [c.id, c])); candidateIds.forEach(id => batch.set(doc(db, "candidates", id), { ...(map.get(id) || {}), archived: true, ownerUid: uid, updatedAt: nowIso }, { merge: true })); await batch.commit(); }); } catch (e) { handleFirestoreError(e, OperationType.WRITE, "candidates/bulkArchive"); throw e; } }
 export async function bulkRestoreCandidatesInCloud(candidateIds: string[], ownerUid?: string, candidatesData?: Candidate[]): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid || candidateIds.length === 0) return; try { await withDbRetry(async () => { const batch = writeBatch(db); const nowIso = new Date().toISOString(); const map = new Map((candidatesData || []).map(c => [c.id, c])); candidateIds.forEach(id => batch.set(doc(db, "candidates", id), { ...(map.get(id) || {}), archived: false, ownerUid: uid, updatedAt: nowIso }, { merge: true })); await batch.commit(); }); } catch (e) { handleFirestoreError(e, OperationType.WRITE, "candidates/bulkRestore"); throw e; } }
 export function subscribeToExpenses(ownerUid: string, onUpdate: (expenses: GeneralExpense[]) => void, onError?: (err: Error) => void): Unsubscribe { const q = query(collection(db, "expenses"), where("ownerUid", "==", ownerUid)); return onSnapshot(q, snapshot => { const list: GeneralExpense[] = []; snapshot.forEach(d => list.push(d.data() as GeneralExpense)); onUpdate(list); }, error => { handleFirestoreError(error, OperationType.LIST, "expenses"); onError?.(error); }); }
