@@ -32,7 +32,7 @@ jobs:
       - name: 🌐 Build Web Application
         run: npm run build:web
 
-      - name: 🔥 Deploy to Firebase Hosting
+      - name: 🔥 Provision and Deploy Firebase Hosting
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
@@ -45,18 +45,33 @@ jobs:
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-service-account.json"
 
-          echo "🔎 Checking Firebase Hosting site..."
-          if npx --yes firebase-tools@latest hosting:sites:get crack-petal-506818-c8 --project crack-petal-506818-c8 --non-interactive >/tmp/hosting-site.json 2>/tmp/hosting-site-error.log; then
-            echo "✅ Hosting site already exists."
-            cat /tmp/hosting-site.json
-          else
-            echo "⚠️ Default Hosting site is missing. Creating it..."
+          echo "🔎 Checking default Firebase Hosting site..."
+          if ! npx --yes firebase-tools@latest hosting:sites:get crack-petal-506818-c8 --project crack-petal-506818-c8 --non-interactive >/tmp/hosting-site.json 2>/tmp/hosting-site-error.log; then
+            echo "⚠️ Default Hosting site is missing. Creating it now..."
             cat /tmp/hosting-site-error.log || true
             npx --yes firebase-tools@latest hosting:sites:create crack-petal-506818-c8 --project crack-petal-506818-c8 --non-interactive
           fi
 
-          echo "🚀 Deploying web app..."
-          npx --yes firebase-tools@latest deploy --only hosting --project crack-petal-506818-c8 --non-interactive
+          echo "🎯 Applying explicit Working- Hosting target..."
+          npx --yes firebase-tools@latest target:apply hosting working crack-petal-506818-c8 --project crack-petal-506818-c8
+
+          echo "🚀 Deploying Web app..."
+          npx --yes firebase-tools@latest deploy --only hosting:working --project crack-petal-506818-c8 --non-interactive
+
+          echo "🔎 Verifying live deployment..."
+          for i in 1 2 3 4 5 6; do
+            status=$(curl -L -s -o /tmp/working-home.html -w "%{http_code}" --max-time 20 https://crack-petal-506818-c8.web.app/ || true)
+            echo "Attempt $i: HTTP $status"
+            if [ "$status" = "200" ] && grep -qi "<html" /tmp/working-home.html; then
+              echo "✅ Firebase Hosting is serving the Working- app."
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "❌ Hosting deployment verification failed."
+          head -c 2000 /tmp/working-home.html || true
+          exit 1
 
       - name: 🧹 Secure credential cleanup
         if: always()
