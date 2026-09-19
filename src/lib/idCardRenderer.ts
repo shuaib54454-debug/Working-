@@ -18,6 +18,22 @@ export interface CandidateIdCardData {
   expiryDate: string; // (YYYY-MM-DD)
 }
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function safeImageUrl(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (/^(https?:\/\/|blob:|data:image\/)/i.test(raw)) return raw;
+  return "";
+}
+
 export interface IdCardRenderOptions {
   maskSensitiveData?: boolean;
   showOrganization?: boolean;
@@ -656,12 +672,12 @@ export function generateFrontCardHtml(
   const showDates = options.showDates !== false;
 
   const orgName = (showOrg && data.organizationName)
-    ? data.organizationName
+    ? escapeHtml(data.organizationName)
     : isAr
     ? "المستشفى التخصصي للرعاية الصحية"
     : "Specialized Healthcare Center";
-  const jobTitle = data.jobTitle || (isAr ? "طبيب" : "Doctor");
-  const photoSrc = data.photoUrl || "";
+  const jobTitle = escapeHtml(data.jobTitle || (isAr ? "طبيب" : "Doctor"));
+  const photoSrc = safeImageUrl(data.photoUrl);
 
   return `
     <div class="cr80-card cr80-card-front" id="cr80-card-front" style="direction: ${isAr ? "rtl" : "ltr"}; text-align: ${isAr ? "right" : "left"};">
@@ -679,8 +695,8 @@ export function generateFrontCardHtml(
           ${
             showLogo
               ? `<div class="cr80-logo-box">
-                  ${data.logoUrl
-                    ? `<img src="${data.logoUrl}" class="cr80-logo-img" alt="Logo" />`
+                  ${safeImageUrl(data.logoUrl)
+                    ? `<img src="${safeImageUrl(data.logoUrl)}" class="cr80-logo-img" alt="Logo" />`
                     : getMedicalEmblemSvg("#0c1a2e")}
                 </div>`
               : ""
@@ -697,7 +713,7 @@ export function generateFrontCardHtml(
             }
           </div>
           <div class="cr80-doc-details">
-            <div class="cr80-doc-name" title="${data.fullName}">${data.fullName || (isAr ? "طبيب معتمد" : "Certified Doctor")}</div>
+            <div class="cr80-doc-name" title="${escapeHtml(data.fullName)}">${escapeHtml(data.fullName || (isAr ? "طبيب معتمد" : "Certified Doctor"))}</div>
             <div class="cr80-job-chip">
               <svg style="width:2.2mm;height:2.2mm;margin-${isAr ? "left" : "right"}:0.8mm;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
@@ -706,7 +722,7 @@ export function generateFrontCardHtml(
             </div>
             <div class="cr80-field-row">
               <span class="cr80-field-label">${isAr ? "رقم التعريف:" : "ID Number:"}</span>
-              <span class="cr80-field-val">${data.idCardNumber || "DOC-0001"}</span>
+              <span class="cr80-field-val">${escapeHtml(data.idCardNumber || "DOC-0001")}</span>
             </div>
           </div>
         </div>
@@ -716,8 +732,8 @@ export function generateFrontCardHtml(
           ${
             showDates
               ? `<div class="cr80-date-badge">
-                  <span>${isAr ? "إصدار:" : "Issued:"} <b>${data.issueDate || new Date().toISOString().slice(0, 10)}</b></span>
-                  <span>${isAr ? "انتهاء:" : "Expires:"} <b>${data.expiryDate || "2028-12-31"}</b></span>
+                  <span>${isAr ? "إصدار:" : "Issued:"} <b>${escapeHtml(data.issueDate || new Date().toISOString().slice(0, 10))}</b></span>
+                  <span>${isAr ? "انتهاء:" : "Expires:"} <b>${escapeHtml(data.expiryDate || "2028-12-31")}</b></span>
                 </div>`
               : `<div></div>`
           }
@@ -766,7 +782,7 @@ export function generateBackCardHtml(
         <!-- Header -->
         <div class="cr80-back-header">
           <span class="cr80-back-title">${isAr ? "البيانات المهنية والأمنية المعتمدة" : "Certified Professional Credentials"}</span>
-          <span class="cr80-back-id">${data.idCardNumber || "DOC-0001"}</span>
+          <span class="cr80-back-id">${escapeHtml(data.idCardNumber || "DOC-0001")}</span>
         </div>
 
         <!-- Back Data Grid -->
@@ -781,7 +797,7 @@ export function generateBackCardHtml(
               </svg>
               <span>${isAr ? "رقم الجواز:" : "Passport No:"}</span>
             </span>
-            <span class="cr80-grid-value">${displayPassport}</span>
+            <span class="cr80-grid-value">${escapeHtml(displayPassport)}</span>
           </div>
 
           <!-- COC Number -->
@@ -792,7 +808,7 @@ export function generateBackCardHtml(
               </svg>
               <span>${isAr ? "شهادة الكفاءة (COC):" : "COC Certificate:"}</span>
             </span>
-            <span class="cr80-grid-value">${displayCoc}</span>
+            <span class="cr80-grid-value">${escapeHtml(displayCoc)}</span>
           </div>
 
           <!-- Medical Exam Status -->
