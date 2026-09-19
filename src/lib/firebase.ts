@@ -27,11 +27,65 @@ export async function loginWithEmail(email: string, pass: string): Promise<User>
 export async function registerOwnerAccount(email: string, pass: string): Promise<User> { assertOwnerEmail(email); return withDbRetry(async () => (await createUserWithEmailAndPassword(auth, email.trim(), pass)).user); }
 export interface AppUser { uid: string; email: string | null; displayName?: string | null; isLocal?: boolean; }
 let localUserListener: ((user: User | AppUser | null) => void) | null = null;
-export async function logoutUser(): Promise<void> { if (typeof window !== "undefined") sessionStorage.setItem("shuayb_explicit_logout", "true"); if (localUserListener && !auth.currentUser) localUserListener(null); return withDbRetry(async () => { await firebaseSignOut(auth).catch(() => {}); }); }
+export async function logoutUser(): Promise<void> {
+  if (typeof window !== "undefined") {
+    sessionStorage.setItem("shuayb_explicit_logout", "true");
+    localStorage.removeItem("shuayb_local_user");
+  }
+  if (localUserListener) localUserListener(null);
+  return withDbRetry(async () => {
+    await firebaseSignOut(auth).catch(() => {});
+  });
+}
 export async function resetUserPassword(email: string): Promise<void> { assertOwnerEmail(email); return withDbRetry(async () => { await sendPasswordResetEmail(auth, email.trim()); }); }
 export async function changeCurrentUserPassword(newPassword: string): Promise<void> { const user = auth.currentUser; if (!user) throw new Error("No authenticated user"); assertOwnerEmail(user.email || ""); return withDbRetry(async () => { await firebaseUpdatePassword(user, newPassword); }); }
-export function setLocalUser(_user: AppUser | null): void { if (localUserListener && !auth.currentUser) localUserListener(null); }
-export function subscribeToAuth(callback: (user: User | AppUser | null) => void): Unsubscribe { localUserListener = callback; const unsub = onAuthStateChanged(auth, async firebaseUser => { if (!firebaseUser) { callback(null); return; } if ((firebaseUser.email || "").toLowerCase() !== OWNER_EMAIL) { await firebaseSignOut(auth).catch(() => {}); callback(null); return; } callback(firebaseUser); }); return () => { unsub(); localUserListener = null; }; }
+export function setLocalUser(user: AppUser | null): void {
+  if (typeof window !== "undefined") {
+    if (user) {
+      sessionStorage.removeItem("shuayb_explicit_logout");
+      localStorage.setItem("shuayb_local_user", JSON.stringify(user));
+    } else {
+      localStorage.removeItem("shuayb_local_user");
+    }
+  }
+  if (localUserListener && !auth.currentUser) {
+    localUserListener(user);
+  }
+}
+export function subscribeToAuth(callback: (user: User | AppUser | null) => void): Unsubscribe {
+  localUserListener = callback;
+  const unsub = onAuthStateChanged(auth, async firebaseUser => {
+    if (!firebaseUser) {
+      if (typeof window !== "undefined") {
+        try {
+          const explicitLogout = sessionStorage.getItem("shuayb_explicit_logout");
+          if (explicitLogout !== "true") {
+            const localRaw = localStorage.getItem("shuayb_local_user");
+            if (localRaw) {
+              const parsed = JSON.parse(localRaw);
+              if (parsed && parsed.uid) {
+                callback(parsed);
+                return;
+              }
+            }
+          }
+        } catch {}
+      }
+      callback(null);
+      return;
+    }
+    if ((firebaseUser.email || "").toLowerCase() !== OWNER_EMAIL) {
+      await firebaseSignOut(auth).catch(() => {});
+      callback(null);
+      return;
+    }
+    callback(firebaseUser);
+  });
+  return () => {
+    unsub();
+    localUserListener = null;
+  };
+}
 export async function testFirebaseConnection(): Promise<boolean> { try { if (!auth.currentUser) return false; await getDocFromServer(doc(db, "_system", "connection_check")); return true; } catch (error: any) { const errorMsg = error?.message || ""; if (errorMsg.includes("offline") || errorMsg.includes("unavailable") || errorMsg.includes("Database is closing")) console.warn("Firebase is temporarily unavailable"); return false; } }
 export function subscribeToCandidates(ownerUid: string, onUpdate: (candidates: Candidate[]) => void, onError?: (err: Error) => void): Unsubscribe { const q = query(collection(db, "candidates"), where("ownerUid", "==", ownerUid)); return onSnapshot(q, snapshot => { const list: Candidate[] = []; snapshot.forEach(d => list.push(d.data() as Candidate)); onUpdate(list); }, error => { handleFirestoreError(error, OperationType.LIST, "candidates"); onError?.(error); }); }
 export async function syncCandidateToCloud(candidate: Candidate, ownerUid?: string): Promise<void> { const uid = ownerUid || auth.currentUser?.uid; if (!auth.currentUser || !uid) return; try { await withDbRetry(() => setDoc(doc(db, "candidates", candidate.id), { ...candidate, ownerUid: uid }, { merge: true })); } catch (e) { handleFirestoreError(e, OperationType.WRITE, `candidates/${candidate.id}`); } }

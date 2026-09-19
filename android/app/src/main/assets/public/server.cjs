@@ -26,21 +26,22 @@ var import_express = __toESM(require("express"), 1);
 var import_genai = require("@google/genai");
 var import_fs = require("fs");
 var import_path = __toESM(require("path"), 1);
-var import_url = require("url");
 var import_auth = require("firebase-admin/auth");
 var import_app = require("firebase-admin/app");
-var import_meta = {};
-var __filename = (0, import_url.fileURLToPath)(import_meta.url);
-var __dirname = import_path.default.dirname(__filename);
+var rootDir = process.cwd();
+var distPath = import_path.default.join(rootDir, "dist");
+var publicPath = import_path.default.join(rootDir, "public");
+var configPath = import_path.default.join(rootDir, "firebase-applet-config.json");
 var app = (0, import_express.default)();
 var PORT = Number.parseInt(process.env.PORT || "3000", 10);
 var OWNER_EMAIL = String(process.env.OWNER_EMAIL || "shuaib54454@gmail.com").trim().toLowerCase();
-var configPath = import_path.default.join(__dirname, "firebase-applet-config.json");
 var firebaseConfig = {};
 try {
-  firebaseConfig = JSON.parse((0, import_fs.readFileSync)(configPath, "utf-8"));
-} catch {
-  console.error("Failed to load Firebase config");
+  if ((0, import_fs.existsSync)(configPath)) {
+    firebaseConfig = JSON.parse((0, import_fs.readFileSync)(configPath, "utf-8"));
+  }
+} catch (error) {
+  console.error("Failed to load Firebase config:", error instanceof Error ? error.message : "unknown error");
 }
 var PRIMARY_PROJECT_ID = String(firebaseConfig?.projectId || "");
 var ALLOWED_PROJECT_IDS = new Set(
@@ -168,9 +169,33 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
     return res.status(500).json({ success: false, error: "Passport scan request failed" });
   }
 });
-app.get("/manifest.webmanifest", (_req, res) => res.sendFile(import_path.default.join(__dirname, "public", "manifest.webmanifest")));
-app.get("/sw.js", (_req, res) => res.sendFile(import_path.default.join(__dirname, "public", "sw.js")));
-app.use(import_express.default.static(import_path.default.join(__dirname, "dist")));
-app.get("*", (_req, res) => res.sendFile(import_path.default.join(__dirname, "dist", "index.html")));
-app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
+async function startServer() {
+  if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa"
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.get("/manifest.webmanifest", (_req, res) => {
+      const distFile = import_path.default.join(distPath, "manifest.webmanifest");
+      if ((0, import_fs.existsSync)(distFile)) return res.sendFile(distFile);
+      return res.sendFile(import_path.default.join(publicPath, "manifest.webmanifest"));
+    });
+    app.get("/sw.js", (_req, res) => {
+      const distFile = import_path.default.join(distPath, "sw.js");
+      if ((0, import_fs.existsSync)(distFile)) return res.sendFile(distFile);
+      return res.sendFile(import_path.default.join(publicPath, "sw.js"));
+    });
+    app.use(import_express.default.static(distPath));
+    app.get("*", (_req, res) => {
+      res.sendFile(import_path.default.join(distPath, "index.html"));
+    });
+  }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+startServer();
 //# sourceMappingURL=server.cjs.map
