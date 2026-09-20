@@ -1,10 +1,8 @@
-name: 🌐 Deploy Working- Web App
-# Automatic deployment retry trigger — Firebase Hosting
+name: "Deploy Working- Web App"
 
-on:
+"on":
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,90 +11,73 @@ permissions:
 
 jobs:
   deploy:
-    name: 🚀 Build and Deploy Web to Firebase Hosting
+    name: "Build and Deploy Web to Firebase Hosting"
     runs-on: ubuntu-latest
     steps:
-      - name: 📥 Checkout
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node.js 22
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      - name: 📦 Install dependencies
+      - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: 🧪 TypeScript check
+      - name: TypeScript check
         run: npm run lint
 
-      - name: 🌐 Build Web Application
+      - name: Build Web Application
         run: npm run build:web
 
-      - name: 🔥 Authenticate and Deploy Firebase Hosting
+      - name: Validate Firebase service account
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
           test -n "$FIREBASE_SERVICE_ACCOUNT" || {
-            echo "❌ FIREBASE_SERVICE_ACCOUNT GitHub secret is not configured."
+            echo "FIREBASE_SERVICE_ACCOUNT is not configured."
             exit 1
           }
-
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.raw"
-          echo "🔐 Validating Firebase service-account credential..."
-          if ! python3 - <<'PY'
-import json, os
-p=os.environ["RUNNER_TEMP"] + "/firebase-service-account.raw"
-raw=open(p,"rb").read().strip()
-try:
-    obj=json.loads(raw.decode("utf-8"))
-except Exception:
-    import base64
-    try:
-        obj=json.loads(base64.b64decode(raw).decode("utf-8"))
-        open(os.environ["RUNNER_TEMP"] + "/firebase-service-account.json","w").write(json.dumps(obj))
-    except Exception as e:
-        raise SystemExit("FIREBASE_SERVICE_ACCOUNT is not valid JSON (or base64-encoded JSON). Replace the GitHub secret with the complete service-account JSON.")
-else:
-    open(os.environ["RUNNER_TEMP"] + "/firebase-service-account.json","wb").write(raw)
-required={"type","project_id","private_key","client_email"}
-missing=required-set(obj)
-if missing:
-    raise SystemExit("FIREBASE_SERVICE_ACCOUNT JSON is missing required service-account fields: " + ", ".join(sorted(missing)))
-PY
+          python3 - <<'PY'
+          import base64, json, os
+          raw = open(os.environ["RUNNER_TEMP"] + "/firebase-service-account.raw","rb").read().strip()
+          try:
+              obj = json.loads(raw.decode("utf-8"))
+          except Exception:
+              obj = json.loads(base64.b64decode(raw).decode("utf-8"))
+          required = {"type","project_id","private_key","client_email"}
+          missing = required - set(obj)
+          if missing:
+              raise SystemExit("Missing required service-account fields: " + ", ".join(sorted(missing)))
+          open(os.environ["RUNNER_TEMP"] + "/firebase-service-account.json","w").write(json.dumps(obj))
+          print("Service-account JSON validated.")
 
-          echo "🔐 Activating service account for Google APIs..."
+      - name: Authenticate Google Cloud
+        run: |
           gcloud auth activate-service-account --key-file="$RUNNER_TEMP/firebase-service-account.json" --project=crack-petal-506818-c8
           gcloud config set project crack-petal-506818-c8
           gcloud services enable firebasehosting.googleapis.com --project crack-petal-506818-c8
 
-          echo "🚀 Deploying through Firebase Hosting REST API..."
-          node scripts/deployFirebaseHosting.mjs
+      - name: Deploy Firebase Hosting
+        run: node scripts/deployFirebaseHosting.mjs
 
-          echo "🔎 Verifying live deployment..."
+      - name: Verify live deployment
+        run: |
           for i in 1 2 3 4 5 6; do
             status=$(curl -L -s -o /tmp/working-home.html -w "%{http_code}" --max-time 20 https://crack-petal-506818-c8.web.app/ || true)
             echo "Attempt $i: HTTP $status"
             if [ "$status" = "200" ] && grep -qi "<html" /tmp/working-home.html; then
-              echo "✅ Firebase Hosting is serving the Working- app."
+              echo "Firebase Hosting is serving the Working- app."
               exit 0
             fi
             sleep 10
           done
-
-          echo "❌ Hosting deployment verification failed."
-          head -c 2000 /tmp/working-home.html || true
           exit 1
 
-      - name: 🚨 Report deployment failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh issue create             --title "🚨 Web deployment failed — $GITHUB_SHA"             --body "The Firebase Hosting deployment failed for commit $GITHUB_SHA. Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Check the failed step and logs." || true
-
-      - name: 🧹 Secure credential cleanup
+      - name: Secure credential cleanup
         if: always()
         run: rm -f "$RUNNER_TEMP/firebase-service-account.json" "$RUNNER_TEMP/firebase-service-account.raw"
