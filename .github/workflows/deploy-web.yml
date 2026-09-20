@@ -33,7 +33,7 @@ jobs:
       - name: 🌐 Build Web Application
         run: npm run build:web
 
-      - name: 🔥 Provision and Deploy Firebase Hosting
+      - name: 🔥 Authenticate and Deploy Firebase Hosting
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
@@ -44,20 +44,13 @@ jobs:
           }
 
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
-          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-service-account.json"
+          echo "🔐 Activating service account for Google APIs..."
+          gcloud auth activate-service-account --key-file="$RUNNER_TEMP/firebase-service-account.json" --project=crack-petal-506818-c8
+          gcloud config set project crack-petal-506818-c8
+          gcloud services enable firebasehosting.googleapis.com --project crack-petal-506818-c8
 
-          echo "🔎 Checking default Firebase Hosting site..."
-          if ! npx --yes firebase-tools@latest hosting:sites:list --project crack-petal-506818-c8 --json > /tmp/hosting-sites.json 2>/tmp/hosting-site-error.log || ! grep -q '"name": "projects/crack-petal-506818-c8/sites/crack-petal-506818-c8"' /tmp/hosting-sites.json; then
-            echo "⚠️ Default Hosting site is missing. Creating it now..."
-            cat /tmp/hosting-site-error.log || true
-            npx --yes firebase-tools@latest hosting:sites:create crack-petal-506818-c8 --project crack-petal-506818-c8 --non-interactive
-          fi
-
-          echo "🎯 Applying explicit Working- Hosting target..."
-          npx --yes firebase-tools@latest target:apply hosting working crack-petal-506818-c8 --project crack-petal-506818-c8
-
-          echo "🚀 Deploying Web app..."
-          npx --yes firebase-tools@latest deploy --only hosting:working --project crack-petal-506818-c8 --non-interactive
+          echo "🚀 Deploying through Firebase Hosting REST API..."
+          node scripts/deployFirebaseHosting.mjs
 
           echo "🔎 Verifying live deployment..."
           for i in 1 2 3 4 5 6; do
@@ -72,7 +65,6 @@ jobs:
 
           echo "❌ Hosting deployment verification failed."
           head -c 2000 /tmp/working-home.html || true
-          gh issue create --title "Web deployment failed" --body "Firebase Hosting deployment verification failed for commit $GITHUB_SHA. Review the workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" || true
           exit 1
 
       - name: 🚨 Report deployment failure
