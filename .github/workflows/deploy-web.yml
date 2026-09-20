@@ -7,7 +7,6 @@ name: "Deploy Working- Web App"
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   deploy:
@@ -38,29 +37,18 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$FIREBASE_SERVICE_ACCOUNT" || {
-            echo "FIREBASE_SERVICE_ACCOUNT is not configured."
+            echo "ERROR: FIREBASE_SERVICE_ACCOUNT is empty or not configured."
+            echo "Add the complete Google Cloud service-account JSON as the GitHub Actions secret."
             exit 1
           }
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.raw"
-          python3 - <<'PY'
-          import base64, json, os
-          raw = open(os.environ["RUNNER_TEMP"] + "/firebase-service-account.raw","rb").read().strip()
-          try:
-              obj = json.loads(raw.decode("utf-8"))
-          except Exception:
-              obj = json.loads(base64.b64decode(raw).decode("utf-8"))
-          required = {"type","project_id","private_key","client_email"}
-          missing = required - set(obj)
-          if missing:
-              raise SystemExit("Missing required service-account fields: " + ", ".join(sorted(missing)))
-          open(os.environ["RUNNER_TEMP"] + "/firebase-service-account.json","w").write(json.dumps(obj))
-          print("Service-account JSON validated.")
+          node "$GITHUB_WORKSPACE/scripts/validateFirebaseServiceAccount.mjs" "$RUNNER_TEMP/firebase-service-account.raw" "$RUNNER_TEMP/firebase-service-account.json"
 
       - name: Authenticate Google Cloud
         run: |
           gcloud auth activate-service-account --key-file="$RUNNER_TEMP/firebase-service-account.json" --project=crack-petal-506818-c8
           gcloud config set project crack-petal-506818-c8
-          gcloud services enable firebasehosting.googleapis.com --project crack-petal-506818-c8
+          gcloud services enable firebasehosting.googleapis.com --project=crack-petal-506818-c8
 
       - name: Deploy Firebase Hosting
         run: node scripts/deployFirebaseHosting.mjs
@@ -76,6 +64,7 @@ jobs:
             fi
             sleep 10
           done
+          echo "ERROR: Firebase Hosting deployment could not be verified."
           exit 1
 
       - name: Secure credential cleanup
