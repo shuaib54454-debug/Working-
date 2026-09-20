@@ -40,9 +40,7 @@ jobs:
           service_account: working-hosting-deploy@crack-petal-506818-c8.iam.gserviceaccount.com
 
       - name: Configure Google Cloud
-        run: |
-          gcloud config set project crack-petal-506818-c8
-          gcloud services enable firebasehosting.googleapis.com --project=crack-petal-506818-c8
+        run: gcloud config set project crack-petal-506818-c8
 
       - name: Deploy Firebase Hosting
         run: node scripts/deployFirebaseHosting.mjs
