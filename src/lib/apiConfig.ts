@@ -28,21 +28,6 @@ export function getCandidateBackendUrls(): string[] {
     candidates.push(envUrl.trim().replace(/\/$/, ""));
   }
 
-  // Same-origin backend is valid when the web app and API are deployed together.
-  if (typeof window !== "undefined" && window.location?.origin) {
-    const origin = window.location.origin;
-    const isLocalhost =
-      origin.includes("localhost") ||
-      origin.includes("127.0.0.1") ||
-      window.location.protocol.startsWith("capacitor") ||
-      window.location.protocol.startsWith("file");
-
-    if (!isLocalhost && origin.startsWith("http")) {
-      candidates.push(origin.replace(/\/$/, ""));
-    }
-  }
-
-  // Native Capacitor builds use the fixed Cloud Run endpoints.
   const isCapacitor =
     Capacitor.isNativePlatform() ||
     (typeof window !== "undefined" &&
@@ -50,9 +35,24 @@ export function getCandidateBackendUrls(): string[] {
         window.location?.origin?.includes("localhost") ||
         window.location?.protocol === "file:"));
 
-  if (isCapacitor) {
+  const isBrowserProduction =
+    typeof window !== "undefined" &&
+    window.location?.protocol.startsWith("http") &&
+    !window.location?.origin?.includes("localhost") &&
+    !window.location?.origin?.includes("127.0.0.1");
+
+  // Production web and native clients use the fixed, application-controlled
+  // Cloud Run backend. This is critical for Firebase Hosting: Hosting serves
+  // the SPA statically, so /api/* is not a backend route there.
+  if (isBrowserProduction || isCapacitor) {
     candidates.push(CLOUD_RUN_DEV_BACKEND);
     candidates.push(CLOUD_RUN_PRE_BACKEND);
+  }
+
+  // Local development keeps the API same-origin because server.ts hosts both
+  // Vite and the Express API locally.
+  if (!isBrowserProduction && typeof window !== "undefined" && window.location?.origin) {
+    candidates.push(window.location.origin.replace(/\/$/, ""));
   }
 
   // Relative path is the final same-origin fallback.
