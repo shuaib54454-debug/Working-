@@ -43,11 +43,11 @@ jobs:
         run: gcloud config set project crack-petal-506818-c8
 
       - name: Deploy Firebase Hosting
-        run: node scripts/deployFirebaseHosting.mjs
+        run: npx --yes firebase-tools@latest deploy --only hosting:working --project crack-petal-506818-c8 --non-interactive
 
       - name: Verify live deployment
         run: |
-          for i in 1 2 3 4 5 6; do
+          for i in 1 2 3 4 5 6 7 8 9 10; do
             status=$(curl -L -s -o /tmp/working-home.html -w "%{http_code}" --max-time 20 https://crack-petal-506818-c8.web.app/ || true)
             echo "Attempt $i: HTTP $status"
             if [ "$status" = "200" ] && grep -qi "<html" /tmp/working-home.html; then
