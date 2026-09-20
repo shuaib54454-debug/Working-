@@ -1,4 +1,5 @@
 name: 🌐 Deploy Working- Web App
+# Automatic deployment retry trigger — Firebase Hosting
 
 on:
   push:
