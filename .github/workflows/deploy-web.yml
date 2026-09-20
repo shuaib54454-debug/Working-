@@ -43,7 +43,29 @@ jobs:
             exit 1
           }
 
-          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.raw"
+          echo "🔐 Validating Firebase service-account credential..."
+          if ! python3 - <<'PY'
+import json, os
+p=os.environ["RUNNER_TEMP"] + "/firebase-service-account.raw"
+raw=open(p,"rb").read().strip()
+try:
+    obj=json.loads(raw.decode("utf-8"))
+except Exception:
+    import base64
+    try:
+        obj=json.loads(base64.b64decode(raw).decode("utf-8"))
+        open(os.environ["RUNNER_TEMP"] + "/firebase-service-account.json","w").write(json.dumps(obj))
+    except Exception as e:
+        raise SystemExit("FIREBASE_SERVICE_ACCOUNT is not valid JSON (or base64-encoded JSON). Replace the GitHub secret with the complete service-account JSON.")
+else:
+    open(os.environ["RUNNER_TEMP"] + "/firebase-service-account.json","wb").write(raw)
+required={"type","project_id","private_key","client_email"}
+missing=required-set(obj)
+if missing:
+    raise SystemExit("FIREBASE_SERVICE_ACCOUNT JSON is missing required service-account fields: " + ", ".join(sorted(missing)))
+PY
+
           echo "🔐 Activating service account for Google APIs..."
           gcloud auth activate-service-account --key-file="$RUNNER_TEMP/firebase-service-account.json" --project=crack-petal-506818-c8
           gcloud config set project crack-petal-506818-c8
@@ -76,4 +98,4 @@ jobs:
 
       - name: 🧹 Secure credential cleanup
         if: always()
-        run: rm -f "$RUNNER_TEMP/firebase-service-account.json"
+        run: rm -f "$RUNNER_TEMP/firebase-service-account.json" "$RUNNER_TEMP/firebase-service-account.raw"
