@@ -52,9 +52,16 @@ jobs:
           WEB_ORIGIN: https://crack-petal-506818-c8.web.app
         run: |
           set -euo pipefail
-          health_status=$(curl -sS -o /tmp/api-health.json -w "%{http_code}" --max-time 30 "$API_BASE_URL/api/health")
+          health_status=$(curl -sS -D /tmp/api-health.headers -o /tmp/api-health.json -w "%{http_code}" --max-time 30 "$API_BASE_URL/api/health")
           echo "Cloud Run /api/health HTTP $health_status"
-          test "$health_status" = "200"
+          echo "--- response headers ---"
+          cat /tmp/api-health.headers
+          echo "--- response body ---"
+          cat /tmp/api-health.json
+          if [ "$health_status" != "200" ]; then
+            echo "ERROR: Cloud Run backend is not serving an unauthenticated health endpoint."
+            exit 1
+          fi
           grep -q '"status":"ok"' /tmp/api-health.json
 
           cors_headers=$(curl -sS -D - -o /dev/null -X OPTIONS \
