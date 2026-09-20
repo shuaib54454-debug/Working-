@@ -109,7 +109,10 @@ const allowedOrigins = new Set<string>([
   "http://localhost",
   "https://localhost",
   "http://localhost:3000",
-  "https://localhost:3000"
+  "https://localhost:3000",
+  // Firebase Hosting production origins for the Working- web application.
+  "https://crack-petal-506818-c8.web.app",
+  "https://crack-petal-506818-c8.firebaseapp.com"
 ]);
 
 app.use((req, res, next) => {
