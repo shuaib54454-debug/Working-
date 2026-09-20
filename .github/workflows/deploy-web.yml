@@ -46,6 +46,18 @@ jobs:
       - name: Configure Google Cloud
         run: gcloud config set project crack-petal-506818-c8
 
+      - name: Inspect Cloud Run services available to deploy identity
+        env:
+          CLOUD_RUN_REGION: europe-west2
+        run: |
+          set -euo pipefail
+          echo "Checking Cloud Run services visible to the GitHub deployment identity..."
+          if ! gcloud run services list --project crack-petal-506818-c8 --region "$CLOUD_RUN_REGION" --format="table(metadata.name,status.url,status.latestCreatedRevisionName)"; then
+            echo "Cloud Run service listing is not permitted for the current deployment identity."
+            echo "A Cloud Run deployment cannot be safely automated until the GitHub OIDC service account has the required Cloud Run IAM permissions."
+            exit 1
+          fi
+
       - name: Verify Cloud Run API and Firebase Hosting CORS
         env:
           API_BASE_URL: https://ais-dev-lcyhq5hqe53iw7xy4xblqz-343361401430.europe-west2.run.app
