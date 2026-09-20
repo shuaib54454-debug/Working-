@@ -7,6 +7,7 @@ name: "Deploy Working- Web App"
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   deploy:
@@ -31,22 +32,15 @@ jobs:
       - name: Build Web Application
         run: npm run build:web
 
-      - name: Validate Firebase service account
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: |
-          set -euo pipefail
-          test -n "$FIREBASE_SERVICE_ACCOUNT" || {
-            echo "ERROR: FIREBASE_SERVICE_ACCOUNT is empty or not configured."
-            echo "Add the complete Google Cloud service-account JSON as the GitHub Actions secret."
-            exit 1
-          }
-          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.raw"
-          node "$GITHUB_WORKSPACE/scripts/validateFirebaseServiceAccount.mjs" "$RUNNER_TEMP/firebase-service-account.raw" "$RUNNER_TEMP/firebase-service-account.json"
+      - name: Authenticate to Google Cloud with GitHub OIDC
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: crack-petal-506818-c8
+          workload_identity_provider: projects/879425467641/locations/global/workloadIdentityPools/github-actions/providers/working-github
+          service_account: working-hosting-deploy@crack-petal-506818-c8.iam.gserviceaccount.com
 
-      - name: Authenticate Google Cloud
+      - name: Configure Google Cloud
         run: |
-          gcloud auth activate-service-account --key-file="$RUNNER_TEMP/firebase-service-account.json" --project=crack-petal-506818-c8
           gcloud config set project crack-petal-506818-c8
           gcloud services enable firebasehosting.googleapis.com --project=crack-petal-506818-c8
 
@@ -66,7 +60,3 @@ jobs:
           done
           echo "ERROR: Firebase Hosting deployment could not be verified."
           exit 1
-
-      - name: Secure credential cleanup
-        if: always()
-        run: rm -f "$RUNNER_TEMP/firebase-service-account.json" "$RUNNER_TEMP/firebase-service-account.raw"
