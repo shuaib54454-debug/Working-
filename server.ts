@@ -2,6 +2,7 @@ import express from "express";
 import { GoogleGenAI } from "@google/genai";
 import { readFileSync, existsSync } from "fs";
 import path from "path";
+import { createVerify } from "crypto";
 import { getAuth } from "firebase-admin/auth";
 import { initializeApp, cert, getApps, App as FirebaseAdminApp } from "firebase-admin/app";
 
@@ -67,8 +68,94 @@ function getTokenProjectId(idToken: string): string {
   if (parts.length !== 3) throw new Error("Malformed Firebase ID token");
   const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf-8"));
   const projectId = typeof payload?.aud === "string" ? payload.aud : "";
-  if (!projectId || !ALLOWED_PROJECT_IDS.has(projectId)) throw new Error(`Unauthorized Firebase project: ${projectId}`);
+  if (!projectId || !ALLOWED_PROJECT_IDS.has(projectId)) {
+    throw new Error(`Unauthorized Firebase project: ${projectId}`);
+  }
   return projectId;
+}
+
+type FirebasePublicKeys = Record<string, string>;
+let firebasePublicKeysCache: { keys: FirebasePublicKeys; expiresAt: number } | null = null;
+
+async function getFirebasePublicKeys(forceRefresh = false): Promise<FirebasePublicKeys> {
+  const now = Date.now();
+  if (!forceRefresh && firebasePublicKeysCache && firebasePublicKeysCache.expiresAt > now) {
+    return firebasePublicKeysCache.keys;
+  }
+  const response = await fetch(
+    "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com",
+    { headers: { Accept: "application/json" } }
+  );
+  if (!response.ok) throw new Error(`Firebase public key fetch failed: HTTP ${response.status}`);
+  const keys = (await response.json()) as FirebasePublicKeys;
+  const cacheControl = response.headers.get("cache-control") || "";
+  const maxAgeMatch = cacheControl.match(/max-age=(\\d+)/i);
+  const maxAgeSeconds = maxAgeMatch ? Number(maxAgeMatch[1]) : 3600;
+  firebasePublicKeysCache = {
+    keys,
+    expiresAt: now + Math.max(60, Math.min(maxAgeSeconds, 86400)) * 1000
+  };
+  return keys;
+}
+
+/**
+ * Fallback for non-Google hosts where Firebase Admin SDK service-account
+ * credentials are unavailable. Firebase documents this third-party JWT
+ * verification model using Google's published Secure Token certificates.
+ */
+async function verifyFirebaseIdTokenWithoutAdmin(idToken: string, projectId: string): Promise<any> {
+  const parts = idToken.split(".");
+  if (parts.length !== 3) throw new Error("Malformed Firebase ID token");
+
+  let header: any;
+  let payload: any;
+  try {
+    header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf-8"));
+    payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf-8"));
+  } catch {
+    throw new Error("Malformed Firebase ID token");
+  }
+
+  if (header?.alg !== "RS256" || typeof header?.kid !== "string" || !header.kid) {
+    throw new Error("Unsupported Firebase ID token header");
+  }
+  if (payload?.aud !== projectId) throw new Error("Firebase ID token audience mismatch");
+  if (payload?.iss !== `https://securetoken.google.com/${projectId}`) {
+    throw new Error("Firebase ID token issuer mismatch");
+  }
+  if (typeof payload?.sub !== "string" || !payload.sub) {
+    throw new Error("Firebase ID token subject is missing");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const clockSkew = 5 * 60;
+  if (typeof payload.exp !== "number" || payload.exp <= now) {
+    throw new Error("Firebase ID token is expired");
+  }
+  if (typeof payload.iat !== "number" || payload.iat > now + clockSkew) {
+    throw new Error("Firebase ID token issued-at time is invalid");
+  }
+  if (typeof payload.auth_time !== "number" || payload.auth_time > now + clockSkew) {
+    throw new Error("Firebase ID token authentication time is invalid");
+  }
+
+  const signedData = `${parts[0]}.${parts[1]}`;
+  const signature = Buffer.from(parts[2], "base64url");
+  let keys = await getFirebasePublicKeys();
+  let certificate = keys[header.kid];
+  if (!certificate) {
+    keys = await getFirebasePublicKeys(true);
+    certificate = keys[header.kid];
+  }
+  if (!certificate) throw new Error("Firebase signing key not found");
+
+  const verifier = createVerify("RSA-SHA256");
+  verifier.update(signedData);
+  verifier.end();
+  if (!verifier.verify(certificate, signature)) {
+    throw new Error("Firebase ID token signature verification failed");
+  }
+  return payload;
 }
 
 async function verifyPassportScanAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -80,11 +167,10 @@ async function verifyPassportScanAuth(req: express.Request, res: express.Respons
   }
   try {
     const projectId = getTokenProjectId(idToken);
-    const auth = getFirebaseAuthForProject(projectId);
-    // checkRevoked requires service account credentials with IAM permissions.
-    // If a service account is configured, checkRevoked = true; otherwise cryptographic public-key verification (checkRevoked = false).
     const hasServiceAccount = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-    const decoded = await auth.verifyIdToken(idToken, hasServiceAccount);
+    const decoded = hasServiceAccount
+      ? await getFirebaseAuthForProject(projectId).verifyIdToken(idToken, true)
+      : await verifyFirebaseIdTokenWithoutAdmin(idToken, projectId);
     const email = typeof decoded.email === "string" ? decoded.email.trim().toLowerCase() : "";
     if (!email || email !== OWNER_EMAIL) return res.status(403).json({ success: false, error: "Owner account required" });
     (req as any).user = decoded;
