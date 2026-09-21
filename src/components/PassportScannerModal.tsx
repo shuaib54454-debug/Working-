@@ -129,9 +129,14 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
         mrzLine1?: string; mrzLine2?: string;
         visualZone?: { firstName?: string; lastName?: string; fullName?: string; fullNameArabic?: string; passportNumber?: string; birthDate?: string; expiryDate?: string; gender?: string; nationality?: string; jobTitle?: string; };
       } | null = null;
-      const res = await postJsonToApi<{ success: boolean; data?: { mrzLine1?: string; mrzLine2?: string; visualZone?: { firstName?: string; lastName?: string; fullName?: string; fullNameArabic?: string; passportNumber?: string; birthDate?: string; expiryDate?: string; gender?: string; nationality?: string; jobTitle?: string; }; }; error?: string; }>("/api/scan-passport", { imageBase64: optimizedImage, mimeType: "image/jpeg" }, 35000);
-      if (res.success && res.data) extractedData = (res.data as any).data || res.data;
-      else if (res.error) { console.warn("Backend /api/scan-passport error:", res.error); setErrorMessage(res.error); }
+      const res = await postJsonToApi<{ success: boolean; data?: { mrzLine1?: string; mrzLine2?: string; visualZone?: { firstName?: string; lastName?: string; fullName?: string; fullNameArabic?: string; passportNumber?: string; birthDate?: string; expiryDate?: string; gender?: string; nationality?: string; jobTitle?: string; }; }; error?: string; }>("/api/scan-passport", { imageBase64: optimizedImage, mimeType: "image/jpeg" }, 90000);
+      if (res.success && res.data) {
+        extractedData = (res.data as any).data || res.data;
+      } else if (res.error) {
+        console.warn("Backend /api/scan-passport error:", res.error);
+        setErrorMessage(\`فشل فحص الجواز من الخادم: \${res.error}\`);
+        return;
+      }
 
       if (extractedData) {
         const { mrzLine1: l1, mrzLine2: l2, visualZone } = extractedData;
