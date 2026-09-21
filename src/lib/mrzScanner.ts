@@ -549,18 +549,22 @@ export function analyzeAndCrossCheckPassport(
   if (birthDate) {
     const birthTime = new Date(birthDate).getTime();
     const nowTime = Date.now();
-    age = Math.floor((nowTime - birthTime) / (1000 * 60 * 60 * 24 * 365.25));
-    isAdult = age >= 18;
-    isWorkAgeEligible = age >= 18 && age <= 60;
+    if (Number.isFinite(birthTime)) {
+      age = Math.floor((nowTime - birthTime) / (1000 * 60 * 60 * 24 * 365.25));
+      isAdult = age >= 18;
+      isWorkAgeEligible = age >= 18 && age <= 60;
 
-    if (!isAdult) {
-      ageStatusText = `العمر (${age} سنة) - قاصر غير مؤهل لعقود التوظيف`;
-      integrityPoints -= 30;
-    } else if (!isWorkAgeEligible) {
-      ageStatusText = `العمر (${age} سنة) - يتجاوز السن المعتاد لتأشيرات الاستقدام`;
-      integrityPoints -= 10;
+      if (!isAdult) {
+        ageStatusText = `العمر (${age} سنة) - قاصر غير مؤهل لعقود التوظيف`;
+        integrityPoints -= 30;
+      } else if (!isWorkAgeEligible) {
+        ageStatusText = `العمر (${age} سنة) - يتجاوز السن المعتاد لتأشيرات الاستقدام`;
+        integrityPoints -= 10;
+      } else {
+        ageStatusText = `العمر (${age} سنة) - مؤهل نظامياً للعمل والاستقدام`;
+      }
     } else {
-      ageStatusText = `العمر (${age} سنة) - مؤهل نظامياً للعمل والاستقدام`;
+      ageStatusText = "لم يتم استخراج تاريخ ميلاد صالح لحساب العمر.";
     }
 
     if (mrzData && visualData?.birthDate) {
@@ -617,6 +621,9 @@ export function analyzeAndCrossCheckPassport(
     if (!mrzData.checksums.expiryDate.isValid) integrityPoints -= 20;
   }
 
+  // Without a complete, mathematically validated MRZ, an integrity score is not meaningful.
+  // Do not display a misleading partial score based only on visual OCR.
+  if (!mrzData) integrityPoints = 0;
   integrityPoints = Math.max(0, Math.min(100, integrityPoints));
 
   let overallStatus: "VERIFIED" | "NEEDS_REVIEW" | "INVALID" = "VERIFIED";
