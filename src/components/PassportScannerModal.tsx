@@ -130,7 +130,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       setIsProcessing(true);
       setStatusMessage("جاري تحضير وضغط الصورة...");
       setErrorMessage(null);
-      const compressedDataUrl = await compressImage(file, { maxWidth: 1600, maxHeight: 1600, quality: 0.85 });
+      const compressedDataUrl = await compressImage(file, { maxWidth: 2200, maxHeight: 2200, quality: 0.92 });
       setSelectedImage(compressedDataUrl);
       await processImageWithAI(compressedDataUrl);
     } catch (err: any) {
