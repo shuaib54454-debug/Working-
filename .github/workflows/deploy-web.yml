@@ -33,7 +33,7 @@ jobs:
         env:
           # Firebase Hosting is static; authenticated /api/* calls go directly
           # to the dedicated Render backend.
-          VITE_API_BASE_URL: https://working-api.onrender.com
+          VITE_API_BASE_URL: https://working-tkge.onrender.com
         run: npm run build:web
 
       - name: Authenticate to Google Cloud with GitHub OIDC
