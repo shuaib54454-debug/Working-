@@ -359,193 +359,93 @@ export function generateTD3MRZFromVisual(params: GenerateMRZParams): { line1: st
  * Complete TD3 Passport MRZ Parser (2 lines x 44 characters) with Smart Anchor Alignment
  */
 export function parseTD3MRZ(rawLine1: string, rawLine2: string): MRZParsedData | null {
-  if (!rawLine1 && !rawLine2) return null;
+  // TD3 MRZ is strict: exactly two lines, 44 characters each.
+  // Never pad, realign, repair, or synthesize missing characters.
+  const line1 = (rawLine1 || "").toUpperCase().replace(/\s/g, "");
+  const line2 = (rawLine2 || "").toUpperCase().replace(/\s/g, "");
 
-  const line1 = sanitizeMRZLine(rawLine1 || "", true);
-  let line2 = sanitizeMRZLine(rawLine2 || "", false);
+  if (line1.length !== 44 || line2.length !== 44) return null;
+  if (!/^P<[A-Z<]{3}/.test(line1)) return null;
+  if (!/^[A-Z0-9<]{44}$/.test(line1) || !/^[A-Z0-9<]{44}$/.test(line2)) return null;
 
-  // --- Line 1 Analysis ---
-  let documentType = line1.slice(0, 2).replace(/</g, "");
-  let issuingCountryCode = line1.slice(2, 5).replace(/</g, "");
-  
-  // If line was slightly offset, search for known 3-letter country code in first 8 chars
-  if (!ICAO_COUNTRY_MAP[issuingCountryCode]) {
-    for (const code of Object.keys(ICAO_COUNTRY_MAP)) {
-      const idx = line1.slice(0, 10).indexOf(code);
-      if (idx !== -1) {
-        issuingCountryCode = code;
-        documentType = "P";
-        break;
-      }
-    }
-  }
+  const documentType = line1.slice(0, 2);
+  const issuingCountryCode = line1.slice(2, 5);
+  if (documentType !== "P<" || !/^[A-Z]{3}$/.test(issuingCountryCode)) return null;
 
-  const issuingCountryName = ICAO_COUNTRY_MAP[issuingCountryCode]?.ar || issuingCountryCode || "المملكة العربية السعودية";
-
-  // Name parsing: SURNAME<<GIVEN<NAMES<<<<<<
+  const issuingCountryName = ICAO_COUNTRY_MAP[issuingCountryCode]?.ar || issuingCountryCode;
   const namePart = line1.slice(5);
   const nameComponents = namePart.split("<<");
-  let surname = (nameComponents[0] || "").replace(/</g, " ").trim();
-  let givenNames = (nameComponents[1] || "").replace(/</g, " ").trim();
-  
-  if (!surname && givenNames) {
-    const parts = givenNames.split(/\s+/);
-    if (parts.length > 1) {
-      surname = parts[parts.length - 1];
-      givenNames = parts.slice(0, -1).join(" ");
-    }
-  } else if (surname && !givenNames) {
-    const parts = surname.split(/\s+/);
-    if (parts.length > 1) {
-      surname = parts[parts.length - 1];
-      givenNames = parts.slice(0, -1).join(" ");
-    }
-  }
+  const surname = (nameComponents[0] || "").replace(/</g, " ").trim();
+  const givenNames = (nameComponents[1] || "").replace(/</g, " ").trim();
+  if (!surname || !givenNames) return null;
 
-  const fullNameLatin = `${givenNames} ${surname}`.trim();
+  // ICAO TD3 fixed positions:
+  // 0-8 passport no, 9 passport check, 10-12 nationality,
+  // 13-18 DOB, 19 DOB check, 20 sex, 21-26 expiry,
+  // 27 expiry check, 28-41 optional/personal no, 42 personal check,
+  // 43 composite check.
+  const passportNumberRaw = line2.slice(0, 9);
+  const passportNumber = passportNumberRaw.replace(/</g, "").trim();
+  const passportCheckDigit = line2[9];
+  const nationalityCode = line2.slice(10, 13);
+  const birthDateRaw = line2.slice(13, 19);
+  const birthCheckDigit = line2[19];
+  const sexChar = line2[20];
+  const expiryDateRaw = line2.slice(21, 27);
+  const expiryCheckDigit = line2[27];
+  const personalNumberRaw = line2.slice(28, 42);
+  const personalNumber = personalNumberRaw.replace(/</g, "").trim();
+  const personalCheckDigit = line2[42];
+  const compositeCheckDigit = line2[43];
 
-  // --- Line 2 Smart Anchor Realignment ---
-  // Search for the standard date & gender signature: [0-9]{6}[0-9]?[MF<][0-9]{6}
-  const dateGenderMatch = line2.match(/(\d{6})\d?([MF<])(\d{6})/);
-  
-  let passportNumber = "";
-  let passportNumberRaw = "";
-  let passportCheckDigit = "";
-  let expectedPassportCheck = "";
-  let nationalityCode = issuingCountryCode;
-  let birthDateRaw = "";
-  let birthParsed = { formatted: "", isValid: false };
-  let gender: "male" | "female" | "other" = "male";
-  let expiryDateRaw = "";
-  let expiryParsed = { formatted: "", isValid: false };
-  let personalNumber = "";
-  let birthCheckDigit = "";
-  let expectedBirthCheck = "";
-  let expiryCheckDigit = "";
-  let expectedExpiryCheck = "";
-  let compositeCheckDigit = "";
-  let expectedCompositeCheck = "";
-  let compositeString = "";
+  if (!/^[A-Z0-9<]{9}$/.test(passportNumberRaw)) return null;
+  if (!/^[A-Z]{3}$/.test(nationalityCode)) return null;
+  if (!/^\d{6}$/.test(birthDateRaw) || !/^\d{6}$/.test(expiryDateRaw)) return null;
+  if (!/[MF<]/.test(sexChar)) return null;
 
-  if (dateGenderMatch && dateGenderMatch.index !== undefined) {
-    const matchIndex = dateGenderMatch.index;
-    birthDateRaw = dateGenderMatch[1];
-    const sexChar = dateGenderMatch[2];
-    expiryDateRaw = dateGenderMatch[3];
+  const birthParsed = parseMRZDate(birthDateRaw, false);
+  const expiryParsed = parseMRZDate(expiryDateRaw, true);
+  if (!birthParsed.isValid || !expiryParsed.isValid) return null;
 
-    gender = sexChar === "F" ? "female" : sexChar === "M" ? "male" : "other";
-    birthParsed = parseMRZDate(birthDateRaw, false);
-    expiryParsed = parseMRZDate(expiryDateRaw, true);
+  const passportExpected = calculateICAOCheckDigit(passportNumberRaw);
+  const birthExpected = calculateICAOCheckDigit(birthDateRaw);
+  const expiryExpected = calculateICAOCheckDigit(expiryDateRaw);
+  const personalExpected = calculateICAOCheckDigit(personalNumberRaw);
+  const compositeString = line2.slice(0, 10) + line2.slice(13, 20) + line2.slice(21, 43);
+  const compositeExpected = calculateICAOCheckDigit(compositeString);
 
-    // Everything before the birthdate contains [PassportNumber] + [CheckDigit] + [Nationality 3 chars]
-    const prefix = line2.slice(0, matchIndex).replace(/</g, "");
-    if (prefix.length >= 3) {
-      const possibleNat = prefix.slice(-3);
-      if (ICAO_COUNTRY_MAP[possibleNat] || /^[A-Z]{3}$/.test(possibleNat)) {
-        nationalityCode = possibleNat;
-        passportNumber = prefix.slice(0, -3);
-      } else {
-        passportNumber = prefix;
-      }
-    } else {
-      passportNumber = prefix;
-    }
-
-    passportNumberRaw = passportNumber.padEnd(9, "<").slice(0, 9);
-    passportCheckDigit = calculateICAOCheckDigit(passportNumberRaw);
-    expectedPassportCheck = passportCheckDigit;
-    birthCheckDigit = calculateICAOCheckDigit(birthDateRaw);
-    expectedBirthCheck = birthCheckDigit;
-    expiryCheckDigit = calculateICAOCheckDigit(expiryDateRaw);
-    expectedExpiryCheck = expiryCheckDigit;
-    compositeCheckDigit = "0";
-    expectedCompositeCheck = "0";
-  } else {
-    // Standard Fixed Slice Fallback
-    passportNumberRaw = line2.slice(0, 9);
-    passportNumber = passportNumberRaw.replace(/</g, "").trim();
-    passportCheckDigit = line2[9] || "0";
-    expectedPassportCheck = calculateICAOCheckDigit(passportNumberRaw);
-
-    nationalityCode = line2.slice(10, 13).replace(/</g, "") || issuingCountryCode;
-
-    birthDateRaw = line2.slice(13, 19);
-    birthCheckDigit = line2[19] || "0";
-    expectedBirthCheck = calculateICAOCheckDigit(birthDateRaw);
-    birthParsed = parseMRZDate(birthDateRaw, false);
-
-    const sexChar = line2[20];
-    if (sexChar === "F") gender = "female";
-    else if (sexChar === "M") gender = "male";
-    else gender = "other";
-
-    expiryDateRaw = line2.slice(21, 27);
-    expiryCheckDigit = line2[27] || "0";
-    expectedExpiryCheck = calculateICAOCheckDigit(expiryDateRaw);
-    expiryParsed = parseMRZDate(expiryDateRaw, true);
-
-    const personalNumberRaw = line2.slice(28, 42);
-    personalNumber = personalNumberRaw.replace(/</g, "").trim();
-
-    compositeString = line2.slice(0, 10) + line2.slice(13, 20) + line2.slice(21, 43);
-    compositeCheckDigit = line2[43] || "0";
-    expectedCompositeCheck = calculateICAOCheckDigit(compositeString);
-  }
-
-  const nationalityName = ICAO_COUNTRY_MAP[nationalityCode]?.ar || nationalityCode || issuingCountryName;
-
-  const passportValid = passportCheckDigit === expectedPassportCheck;
-  const birthValid = birthCheckDigit === expectedBirthCheck || birthParsed.isValid;
-  const expiryValid = expiryCheckDigit === expectedExpiryCheck || expiryParsed.isValid;
-  const compositeValid = true;
-
-  const allValid = birthParsed.isValid && expiryParsed.isValid;
+  const checksums = {
+    passportNumber: { value: passportNumberRaw, actualCheckDigit: passportCheckDigit, expectedCheckDigit: passportExpected, isValid: passportCheckDigit === passportExpected },
+    birthDate: { value: birthDateRaw, actualCheckDigit: birthCheckDigit, expectedCheckDigit: birthExpected, isValid: birthCheckDigit === birthExpected },
+    expiryDate: { value: expiryDateRaw, actualCheckDigit: expiryCheckDigit, expectedCheckDigit: expiryExpected, isValid: expiryCheckDigit === expiryExpected },
+    personalNumber: { value: personalNumberRaw, actualCheckDigit: personalCheckDigit, expectedCheckDigit: personalExpected, isValid: personalCheckDigit === personalExpected },
+    composite: { value: compositeString, actualCheckDigit: compositeCheckDigit, expectedCheckDigit: compositeExpected, isValid: compositeCheckDigit === compositeExpected },
+    allValid: passportCheckDigit === passportExpected &&
+      birthCheckDigit === birthExpected &&
+      expiryCheckDigit === expiryExpected &&
+      personalCheckDigit === personalExpected &&
+      compositeCheckDigit === compositeExpected
+  };
 
   return {
-    documentType: documentType || "P",
-    issuingCountryCode: issuingCountryCode || "SAU",
+    documentType,
+    issuingCountryCode,
     issuingCountryName,
-    surname: surname || "المرشح",
-    givenNames: givenNames || "",
-    fullNameLatin: fullNameLatin || givenNames || surname,
-    passportNumber: passportNumber || "E00000000",
-    nationalityCode: nationalityCode || issuingCountryCode,
-    nationalityName,
+    surname,
+    givenNames,
+    fullNameLatin: `${givenNames} ${surname}`.trim(),
+    passportNumber,
+    nationalityCode,
+    nationalityName: ICAO_COUNTRY_MAP[nationalityCode]?.ar || nationalityCode,
     birthDateRaw,
-    birthDateFormatted: birthParsed.formatted || "1995-01-01",
-    gender,
+    birthDateFormatted: birthParsed.formatted,
+    gender: sexChar === "F" ? "female" : sexChar === "M" ? "male" : "other",
     expiryDateRaw,
-    expiryDateFormatted: expiryParsed.formatted || "2030-01-01",
+    expiryDateFormatted: expiryParsed.formatted,
     personalNumber: personalNumber || undefined,
     rawLine1: line1,
     rawLine2: line2,
-    checksums: {
-      passportNumber: {
-        value: passportNumberRaw,
-        actualCheckDigit: passportCheckDigit,
-        expectedCheckDigit: expectedPassportCheck,
-        isValid: passportValid
-      },
-      birthDate: {
-        value: birthDateRaw,
-        actualCheckDigit: birthCheckDigit,
-        expectedCheckDigit: expectedBirthCheck,
-        isValid: birthValid
-      },
-      expiryDate: {
-        value: expiryDateRaw,
-        actualCheckDigit: expiryCheckDigit,
-        expectedCheckDigit: expectedExpiryCheck,
-        isValid: expiryValid
-      },
-      composite: {
-        value: compositeString,
-        actualCheckDigit: compositeCheckDigit,
-        expectedCheckDigit: expectedCompositeCheck,
-        isValid: compositeValid
-      },
-      allValid
-    }
+    checksums
   };
 }
 
