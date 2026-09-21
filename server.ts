@@ -495,34 +495,9 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
       }
     }
 
-    /*
-     * Fallback only: native OCR is now used after Gemini, not before it.
-     * This prevents the expensive OCR pipeline from causing the normal request
-     * to time out.
-     */
-    try {
-      const nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr([rawBase64]);
-      if (nativeVerifiedMrz) {
-        const data = normalizePassportScanResult({
-          mrzLine1: nativeVerifiedMrz.line1,
-          mrzLine2: nativeVerifiedMrz.line2
-        });
-        return res.json({
-          success: true,
-          data,
-          passportDetected: true,
-          confidence: 1,
-          model: "native-mrz-fallback",
-          mrzSource: "native-ocr-verified"
-        });
-      }
-    } catch (error) {
-      console.warn(
-        "Native MRZ fallback failed:",
-        error instanceof Error ? error.message : "unknown error"
-      );
-    }
-
+    // Keep the request deliberately simple: one Vision extraction only.
+    // Do not start a second OCR/MRZ pipeline after a Gemini timeout; that
+    // secondary work was the main cause of the browser-side timeout.
     if (!ai) {
       return res.status(503).json({
         success: false,
