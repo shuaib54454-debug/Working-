@@ -426,6 +426,24 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
       }
     }
 
+    // Fast-path: a checksum-valid native MRZ already contains the structured
+    // passport identity fields required by the client (passport number, DOB,
+    // expiry, sex, nationality, surname and given names). Return it immediately.
+    // This is the authoritative acceptance path and avoids a network/AI timeout.
+    // VIZ extraction is optional and must never delay or weaken MRZ verification.
+    if (nativeVerifiedMrz) {
+      const fastData = normalizePassportScanResult({
+        mrzLine1: nativeVerifiedMrz.line1,
+        mrzLine2: nativeVerifiedMrz.line2
+      });
+      return res.json({
+        success: true,
+        data: fastData,
+        model: "native-mrz-ocr",
+        mrzSource: "native-ocr-verified"
+      });
+    }
+
     if (!ai) {
       if (nativeVerifiedMrz) {
         const fallbackData = normalizePassportScanResult({
