@@ -622,11 +622,17 @@ export function analyzeAndCrossCheckPassport(
   let overallStatus: "VERIFIED" | "NEEDS_REVIEW" | "INVALID" = "VERIFIED";
   let overallSummary = "جواز سفر سليم وتمت مطابقة وتدقيق كافة الأرقام والتواريخ بنجاح.";
 
-  if (isExpired || integrityPoints < 50) {
+  // VERIFIED is reserved for a complete, mathematically valid TD3 MRZ.
+  // Missing/invalid MRZ must never become VERIFIED merely because dates can be parsed.
+  const hasStrictValidMrz = Boolean(mrzData && mrzData.checksums.allValid);
+
+  if (!hasStrictValidMrz || isExpired || integrityPoints < 50) {
     overallStatus = "INVALID";
-    overallSummary = isExpired
-      ? "تنبيه حرج: جواز السفر منتهي الصلاحية ولا يمكن استخدامه لإصدار التأشيرة."
-      : "تحذير: فشل تدقيق التوقيع الرياضي أو عدم تطابق جوهري في البيانات.";
+    overallSummary = !hasStrictValidMrz
+      ? "لا يمكن اعتماد الجواز: منطقة MRZ غير مكتملة أو فشلت أرقام التحقق وفق ICAO 9303."
+      : isExpired
+        ? "تنبيه حرج: جواز السفر منتهي الصلاحية ولا يمكن استخدامه لإصدار التأشيرة."
+        : "تحذير: فشل تدقيق التوقيع الرياضي أو عدم تطابق جوهري في البيانات.";
   } else if (integrityPoints < 85 || validityStatus === "expiring_soon") {
     overallStatus = "NEEDS_REVIEW";
     overallSummary =
