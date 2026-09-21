@@ -32,8 +32,8 @@ jobs:
       - name: Build Web Application
         env:
           # Firebase Hosting is static; authenticated /api/* calls go directly
-          # to the fixed Cloud Run backend.
-          VITE_API_BASE_URL: https://ais-dev-lcyhq5hqe53iw7xy4xblqz-343361401430.europe-west2.run.app
+          # to the dedicated Render backend.
+          VITE_API_BASE_URL: https://working-api.onrender.com
         run: npm run build:web
 
       - name: Authenticate to Google Cloud with GitHub OIDC
@@ -45,47 +45,6 @@ jobs:
 
       - name: Configure Google Cloud
         run: gcloud config set project crack-petal-506818-c8
-
-      - name: Inspect Cloud Run services available to deploy identity
-        env:
-          CLOUD_RUN_REGION: europe-west2
-        run: |
-          set -euo pipefail
-          echo "Checking Cloud Run services visible to the GitHub deployment identity..."
-          if ! gcloud run services list --project crack-petal-506818-c8 --region "$CLOUD_RUN_REGION" --format="table(metadata.name,status.url,status.latestCreatedRevisionName)"; then
-            echo "Cloud Run service listing is not permitted for the current deployment identity."
-            echo "A Cloud Run deployment cannot be safely automated until the GitHub OIDC service account has the required Cloud Run IAM permissions."
-            exit 1
-          fi
-
-      - name: Verify Cloud Run API and Firebase Hosting CORS
-        env:
-          API_BASE_URL: https://ais-dev-lcyhq5hqe53iw7xy4xblqz-343361401430.europe-west2.run.app
-          WEB_ORIGIN: https://crack-petal-506818-c8.web.app
-        run: |
-          set -euo pipefail
-          health_status=$(curl -sS -D /tmp/api-health.headers -o /tmp/api-health.json -w "%{http_code}" --max-time 30 "$API_BASE_URL/api/health")
-          echo "Cloud Run /api/health HTTP $health_status"
-          echo "--- response headers ---"
-          cat /tmp/api-health.headers
-          echo "--- response body ---"
-          cat /tmp/api-health.json
-          if [ "$health_status" != "200" ]; then
-            echo "ERROR: Cloud Run backend is not serving an unauthenticated health endpoint."
-            exit 1
-          fi
-          grep -q '"status":"ok"' /tmp/api-health.json
-
-          cors_headers=$(curl -sS -D - -o /dev/null -X OPTIONS \
-            -H "Origin: $WEB_ORIGIN" \
-            -H "Access-Control-Request-Method: POST" \
-            -H "Access-Control-Request-Headers: authorization,content-type" \
-            --max-time 30 "$API_BASE_URL/api/scan-passport")
-          printf '%s\n' "$cors_headers"
-          echo "$cors_headers" | grep -qi "^HTTP/.* 204"
-          echo "$cors_headers" | grep -qi "Access-Control-Allow-Origin: $WEB_ORIGIN"
-          echo "$cors_headers" | grep -qi "Access-Control-Allow-Headers:.*Authorization"
-          echo "$cors_headers" | grep -qi "Access-Control-Allow-Methods:.*POST"
 
       - name: Deploy Firebase Hosting
         run: npx --yes firebase-tools@latest deploy --only hosting:working --project crack-petal-506818-c8 --non-interactive
