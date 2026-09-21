@@ -267,24 +267,45 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
 
   const handleApply = () => {
     const mrz = analysis?.mrz;
-    const isVerified = Boolean(mrz && mrz.checksums.allValid && analysis?.overallStatus === "VERIFIED" && !analysis.validityAnalysis.isExpired);
-    if (!isVerified) {
-      setErrorMessage("لا يمكن اعتماد بيانات الجواز قبل استخراج MRZ حقيقي والتحقق من جميع أرقام التحقق والمطابقة.");
-      return;
-    }
-    const fName = (mrz?.givenNames || candidateFirstName).trim();
+    const hasVerifiedMrz = Boolean(mrz && mrz.checksums.allValid);
+    const fName = (mrz?.givenNames || candidateFirstName || visualName).trim();
     const lName = (mrz?.surname || candidateLastName || fName).trim();
     const passNo = cleanPassportNumber(mrz?.passportNumber || visualPassportNo);
     const passExp = normalizeDateToISO(mrz?.expiryDateFormatted || visualExpiryDate);
     const bDate = normalizeDateToISO(mrz?.birthDateFormatted || visualBirthDate);
-    const gndr = mrz?.gender === "female" ? "female" : "male";
+    const gndr = mrz?.gender === "female" ? "female" : visualGender;
     const cntry = mrz?.nationalityName || mrz?.issuingCountryName || visualNationality;
-    const approval = canApprovePassportData({ hasVerifiedMrz: true, passportNumber: passNo, firstName: fName, lastName: lName, birthDate: bDate, expiryDate: passExp });
-    if (!approval.allowed || !approval.normalizedData) {
-      setErrorMessage(approval.reason || "لا يمكن اعتماد بيانات الجواز قبل اكتمال التحقق.");
+
+    if (!fName || !passNo || !bDate || !passExp) {
+      setErrorMessage("لم يتم استخراج جميع البيانات الأساسية من الجواز. يرجى رفع صورة أوضح.");
       return;
     }
-    onApplyData({ firstName: approval.normalizedData.firstName, lastName: approval.normalizedData.lastName, passportNumber: approval.normalizedData.passportNumber, passportExpiryDate: approval.normalizedData.expiryDate, dateOfBirth: approval.normalizedData.birthDate, gender: gndr, country: cntry, job: visualJob || "عاملة منزلية" });
+
+    const approval = canApprovePassportData({
+      hasVerifiedMrz,
+      allowVisualData: true,
+      passportNumber: passNo,
+      firstName: fName,
+      lastName: lName,
+      birthDate: bDate,
+      expiryDate: passExp
+    });
+
+    if (!approval.allowed || !approval.normalizedData) {
+      setErrorMessage(approval.reason || "يرجى مراجعة بيانات الجواز.");
+      return;
+    }
+
+    onApplyData({
+      firstName: approval.normalizedData.firstName,
+      lastName: approval.normalizedData.lastName,
+      passportNumber: approval.normalizedData.passportNumber,
+      passportExpiryDate: approval.normalizedData.expiryDate,
+      dateOfBirth: approval.normalizedData.birthDate,
+      gender: gndr,
+      country: cntry,
+      job: visualJob || "عاملة منزلية"
+    });
     onClose();
   };
 
