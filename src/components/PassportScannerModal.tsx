@@ -46,6 +46,23 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
   useEffect(() => { if (!isOpen) stopCamera(); }, [isOpen]);
   useEffect(() => { if (activeMode !== "CAMERA") stopCamera(); }, [activeMode]);
 
+  const resetScanState = () => {
+    setMrzLine1("");
+    setMrzLine2("");
+    setCandidateFirstName("");
+    setCandidateLastName("");
+    setVisualName("");
+    setVisualPassportNo("");
+    setVisualBirthDate("");
+    setVisualExpiryDate("");
+    setVisualGender("male");
+    setVisualNationality("المملكة العربية السعودية");
+    setVisualJob("عامل / عاملة");
+    setAnalysis(null);
+    setStatusMessage(null);
+    setErrorMessage(null);
+  };
+
   useEffect(() => {
     if (!mrzLine1 && !mrzLine2 && !visualPassportNo && !candidateFirstName) {
       setAnalysis(null);
@@ -97,6 +114,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
     if (!ctx) return;
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
     const rawDataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    resetScanState();
     setSelectedImage(rawDataUrl);
     stopCamera();
     await processImageWithAI(rawDataUrl);
@@ -106,6 +124,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
     const file = e.target.files?.[0];
     if (!file) return;
     try {
+      resetScanState();
       setIsProcessing(true);
       setStatusMessage("جاري تحضير وضغط الصورة...");
       setErrorMessage(null);
@@ -168,14 +187,23 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
             setStatusMessage("تم استخراج وتدقيق بيانات الجواز بنجاح ومطابقة معايير ICAO.");
             setErrorMessage(null);
           } else {
+            setMrzLine1("");
+            setMrzLine2("");
+            setAnalysis(null);
             setStatusMessage(null);
             setErrorMessage("تم استخراج البيانات البصرية، لكن لم يتم استخراج MRZ كامل من الصورة. لا يمكن اعتماد البيانات قبل توفر MRZ حقيقي صالح.");
           }
         } else {
+          setMrzLine1("");
+          setMrzLine2("");
+          setAnalysis(null);
           setStatusMessage(null);
           setErrorMessage("تم استلام الصورة بنجاح، لكن لم يتم التعرف على بيانات جواز واضحة. يرجى رفع صورة أوضح.");
         }
       } else {
+        setMrzLine1("");
+        setMrzLine2("");
+        setAnalysis(null);
         setErrorMessage("تنبيه: تعذر استخراج النص تلقائياً. لا يمكن اعتماد البيانات دون MRZ حقيقي متحقق منه.");
       }
     } catch (e: any) {
