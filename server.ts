@@ -7,6 +7,7 @@ import { getAuth } from "firebase-admin/auth";
 import { initializeApp, cert, getApps, App as FirebaseAdminApp } from "firebase-admin/app";
 import sharp from "sharp";
 import { extractVerifiedMrzWithNativeOcr } from "./server/mrzOcr";
+import { parseTD3MRZ } from "./src/lib/mrzScanner";
 
 const rootDir = process.cwd();
 const distPath = path.join(rootDir, "dist");
@@ -345,6 +346,21 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
     if (estimatedBytes > 8 * 1024 * 1024) {
       return res.status(413).json({ success: false, error: "Passport image is too large" });
     }
+    // Deterministic MRZ path runs independently of Gemini. It is the recovery path when
+    // Vision OCR cannot read the machine-readable zone. Acceptance still requires all ICAO
+    // TD3 check digits to validate; no MRZ is synthesized from visual fields.
+    const mrzFocusedImages = await buildMrzFocusedImages(rawBase64);
+    const nativeImages = [rawBase64, ...mrzFocusedImages];
+    try {
+      const nativeMrz = await extractVerifiedMrzWithNativeOcr(nativeImages);
+      if (nativeMrz) {
+        const verifiedData = normalizePassportScanResult({ mrzLine1: nativeMrz.line1, mrzLine2: nativeMrz.line2 });
+        return res.json({ success: true, data: verifiedData, model: "native-mrz-ocr", mrzSource: "native-ocr-verified" });
+      }
+    } catch (error) {
+      console.warn("Native MRZ OCR path failed:", error instanceof Error ? error.message : "unknown error");
+    }
+
     if (!ai) return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
 
     const prompt = `Analyze this passport image for OCR and MRZ data. Never invent, repair, synthesize, reconstruct, or guess any MRZ characters or passport fields. Return JSON only using exactly these top-level keys: mrzLine1, mrzLine2, visualZone. visualZone must contain only visible fields: firstName, lastName, fullName, fullNameArabic, passportNumber, birthDate, expiryDate, gender, nationality, jobTitle. mrzLine1 and mrzLine2 must contain the two COMPLETE visible ICAO TD3 MRZ lines exactly as read, including < filler characters, with no spaces. If either MRZ line cannot be read completely, return that line as an empty string. Do not manufacture missing characters.`;
@@ -371,27 +387,13 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
         const parsed = JSON.parse(text);
         const normalized = normalizePassportScanResult(parsed);
 
+        // Gemini is still used for VIZ and as a secondary MRZ reader, but its MRZ is
+        // accepted only after the same strict ICAO parser/checksum gate.
         if (normalized.mrzDetected) {
-          // Native OCR fallback: use deterministic image preprocessing + Tesseract, then
-        // accept a result only when the strict ICAO TD3 parser validates every check digit.
-        // Gemini remains useful for VIZ extraction, but it is no longer the sole MRZ reader.
-        const nativeImages = [rawBase64, ...mrzFocusedImages];
-        const nativeMrz = await extractVerifiedMrzWithNativeOcr(nativeImages);
-        if (nativeMrz) {
-          const verifiedData = normalizePassportScanResult({
-            ...parsed,
-            mrzLine1: nativeMrz.line1,
-            mrzLine2: nativeMrz.line2
-          });
-          return res.json({
-            success: true,
-            data: verifiedData,
-            model: `${model}+native-mrz-ocr`,
-            mrzSource: "native-ocr-verified"
-          });
-        }
-
-        return res.json({ success: true, data: normalized, model });
+          const parsedMrz = parseTD3MRZ(normalized.mrzLine1 || "", normalized.mrzLine2 || "");
+          if (parsedMrz?.checksums.allValid) {
+            return res.json({ success: true, data: normalized, model });
+          }
         }
 
         const retryImages = mrzFocusedImages.length > 0 ? mrzFocusedImages : [rawBase64];
@@ -417,7 +419,10 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
             mrz: retryParsed?.mrz
           });
           if (retryNormalized.mrzDetected) {
-            return res.json({ success: true, data: retryNormalized, model });
+            const retryMrz = parseTD3MRZ(retryNormalized.mrzLine1 || "", retryNormalized.mrzLine2 || "");
+            if (retryMrz?.checksums.allValid) {
+              return res.json({ success: true, data: retryNormalized, model });
+            }
           }
         }
 
