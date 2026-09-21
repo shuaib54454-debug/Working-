@@ -101,7 +101,12 @@ function uniquelyRepairOneCharacter(line1: string, line2: string): { line1: stri
 }
 
 function validateCandidates(ocrText: string): { line1: string; line2: string } | null {
-  const [first, second] = candidateLines(ocrText);
+  const [firstRaw, secondRaw] = candidateLines(ocrText);
+  // Bound candidate work. OCR output from a full passport can contain many
+  // 44-character windows; exhaustive repair across all of them can become
+  // quadratic and was a major source of request timeouts.
+  const first = firstRaw.slice(0, 4);
+  const second = secondRaw.slice(0, 6);
   for (const l1Raw of first) {
     const l1Variants = [
       l1Raw,
@@ -115,12 +120,15 @@ function validateCandidates(ocrText: string): { line1: string; line2: string } |
         const parsedRaw = parseTD3MRZ(l1, l2Raw);
         if (parsedRaw?.checksums.allValid) return { line1: l1, line2: l2Raw };
 
-        // Last-resort OCR correction: try exactly one character replacement and
-        // accept it only when the complete ICAO checksum system yields one unique solution.
-        const repaired = uniquelyRepairOneCharacter(l1, l2);
-        if (repaired) return repaired;
-        const repairedRaw = uniquelyRepairOneCharacter(l1, l2Raw);
-        if (repairedRaw) return repairedRaw;
+        // Last-resort OCR correction is intentionally bounded to the most
+        // plausible candidate pair. The complete ICAO checksum gate remains
+        // mandatory; no synthetic MRZ is accepted.
+        if (first.length === 1 && second.length === 1) {
+          const repaired = uniquelyRepairOneCharacter(l1, l2);
+          if (repaired) return repaired;
+          const repairedRaw = uniquelyRepairOneCharacter(l1, l2Raw);
+          if (repairedRaw) return repairedRaw;
+        }
       }
     }
   }
@@ -135,38 +143,46 @@ async function preprocess(base64: string, mode: number): Promise<Buffer> {
   const height = meta.height || 0;
   if (!width || !height) throw new Error("Invalid image dimensions");
 
-  const top = Math.floor(height * (mode === 0 ? 0.55 : mode === 1 ? 0.42 : 0.30));
+  const top = Math.floor(height * (mode === 0 ? 0.50 : mode === 1 ? 0.32 : 0.20));
   const crop = image.extract({ left: 0, top, width, height: height - top });
   const pipeline = mode === 2
-    ? crop.resize({ width: Math.min(3600, Math.max(2200, width * 2)) }).grayscale().normalize().sharpen({ sigma: 1.4 }).threshold(170)
-    : crop.resize({ width: Math.min(3600, Math.max(2400, width * 2.2)) }).grayscale().normalize().sharpen({ sigma: 1.2 });
+    ? crop.resize({ width: Math.min(3000, Math.max(1800, width * 1.8)) }).grayscale().normalize().sharpen({ sigma: 1.2 }).threshold(175)
+    : crop.resize({ width: Math.min(3000, Math.max(1800, width * 1.8)) }).grayscale().normalize().sharpen({ sigma: 1.1 });
   return pipeline.png().toBuffer();
 }
 
 export async function extractVerifiedMrzWithNativeOcr(base64Images: string[]): Promise<{ line1: string; line2: string } | null> {
   const dir = await mkdtemp(path.join(tmpdir(), `working-mrz-${randomUUID()}-`));
   try {
-    const images = base64Images.slice(0, 10);
-    for (let imageIndex = 0; imageIndex < images.length; imageIndex++) {
-      for (let mode = 0; mode < 3; mode++) {
-        try {
-          const png = await preprocess(images[imageIndex], mode);
-          const file = path.join(dir, `mrz-${imageIndex}-${mode}.png`);
-          await writeFile(file, png);
-          const baseArgs = [
-            file, "stdout", "--oem", "1", "-l", "eng",
-            "-c", "tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<",
-            "-c", "load_system_dawg=0",
-            "-c", "load_freq_dawg=0"
-          ];
-          for (const psm of ["6", "11"]) {
-            const text = await execFileAsync("tesseract", [...baseArgs, "--psm", psm]);
-            const verified = validateCandidates(text);
-            if (verified) return verified;
-          }
-        } catch (error) {
-          console.warn("Native MRZ OCR attempt failed:", error instanceof Error ? error.message : "unknown error");
-        }
+    // Keep the native path bounded. Tesseract is the deterministic verifier,
+    // but running dozens of full-page OCR processes on Render can exceed the
+    // browser request timeout. Use the original image plus at most two focused
+    // crops, with two high-value preprocessing modes and line/block segmentation.
+    const images = base64Images.slice(0, 3);
+    const jobs: Array<{ imageIndex: number; mode: number; psm: string }> = [];
+    for (let imageIndex = 0; imageIndex < images.length; imageIndex += 1) {
+      for (const mode of [0, 2]) {
+        for (const psm of ["6", "7"]) jobs.push({ imageIndex, mode, psm });
+      }
+    }
+
+    for (const job of jobs) {
+      try {
+        const png = await preprocess(images[job.imageIndex], job.mode);
+        const file = path.join(dir, `mrz-${job.imageIndex}-${job.mode}-${job.psm}.png`);
+        await writeFile(file, png);
+        const baseArgs = [
+          file, "stdout", "--oem", "1", "-l", "eng",
+          "-c", "tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<",
+          "-c", "load_system_dawg=0",
+          "-c", "load_freq_dawg=0",
+          "-c", "classify_enable_learning=0"
+        ];
+        const text = await execFileAsync("tesseract", [...baseArgs, "--psm", job.psm]);
+        const verified = validateCandidates(text);
+        if (verified) return verified;
+      } catch (error) {
+        console.warn("Native MRZ OCR attempt failed:", error instanceof Error ? error.message : "unknown error");
       }
     }
     return null;
