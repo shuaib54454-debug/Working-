@@ -236,24 +236,31 @@ function normalizePassportScanResult(raw: any) {
   };
 }
 
-async function buildMrzFocusedImage(rawBase64: string): Promise<string | null> {
+async function buildMrzFocusedImages(rawBase64: string): Promise<string[]> {
   try {
     const input = Buffer.from(rawBase64, "base64");
     const metadata = await sharp(input).metadata();
     const width = metadata.width;
     const height = metadata.height;
     if (!width || !height || height < 200) return null;
-    const top = Math.max(0, Math.floor(height * 0.55));
-    const cropHeight = height - top;
-    const output = await sharp(input)
-      .extract({ left: 0, top, width, height: cropHeight })
-      .resize({ width: Math.min(Math.max(width, 1600), 2600), withoutEnlargement: false })
-      .sharpen({ sigma: 1.2 })
-      .jpeg({ quality: 95, chromaSubsampling: "4:4:4" })
-      .toBuffer();
-    return output.toString("base64");
+    const outputs: string[] = [];
+    for (const ratio of [0.45, 0.55, 0.62]) {
+      const top = Math.max(0, Math.floor(height * ratio));
+      const cropHeight = height - top;
+      if (cropHeight < 80) continue;
+      const output = await sharp(input)
+        .extract({ left: 0, top, width, height: cropHeight })
+        .resize({ width: Math.min(Math.max(width, 1800), 3000), withoutEnlargement: false })
+        .grayscale()
+        .normalize()
+        .sharpen({ sigma: 1.2 })
+        .jpeg({ quality: 97, chromaSubsampling: "4:4:4" })
+        .toBuffer();
+      outputs.push(output.toString("base64"));
+    }
+    return outputs;
   } catch (error) {
-    console.warn("Could not prepare focused MRZ image:", error instanceof Error ? error.message : "unknown error");
+    console.warn("Could not prepare focused MRZ images:", error instanceof Error ? error.message : "unknown error");
     return null;
   }
 }
@@ -323,7 +330,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
 
     const prompt = `Analyze this passport image for OCR and MRZ data. Never invent, repair, synthesize, reconstruct, or guess any MRZ characters or passport fields. Return JSON only using exactly these top-level keys: mrzLine1, mrzLine2, visualZone. visualZone must contain only visible fields: firstName, lastName, fullName, fullNameArabic, passportNumber, birthDate, expiryDate, gender, nationality, jobTitle. mrzLine1 and mrzLine2 must contain the two COMPLETE visible ICAO TD3 MRZ lines exactly as read, including < filler characters, with no spaces. If either MRZ line cannot be read completely, return that line as an empty string. Do not manufacture missing characters.`;
     const mrzRetryPrompt = `Read ONLY the Machine Readable Zone (MRZ) shown in this focused crop of the lower part of the passport page. Never guess, repair, reconstruct, or invent characters. Return JSON with exactly mrzLine1 and mrzLine2. Each value must be the complete visible ICAO TD3 line of exactly 44 characters with no spaces. If a complete line cannot be read with confidence, return an empty string for that line. Do not return partial or invented MRZ data.`;
-    const mrzFocusedBase64 = await buildMrzFocusedImage(rawBase64);
+    const mrzFocusedImages = await buildMrzFocusedImages(rawBase64);
     const models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
     let lastError: unknown = null;
 
@@ -349,19 +356,21 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
           return res.json({ success: true, data: normalized, model });
         }
 
-        const retry = await ai.models.generateContent({
-          model,
-          contents: [{
-            role: "user",
-            parts: [
-              { inlineData: { mimeType: "image/jpeg", data: mrzFocusedBase64 || rawBase64 } },
-              { text: mrzRetryPrompt }
-            ]
-          }],
-          config: { responseMimeType: "application/json" }
-        });
-        const retryText = retry.text?.trim();
-        if (retryText) {
+        const retryImages = mrzFocusedImages.length > 0 ? mrzFocusedImages : [rawBase64];
+        for (let retryIndex = 0; retryIndex < retryImages.length; retryIndex += 1) {
+          const retry = await ai.models.generateContent({
+            model,
+            contents: [{
+              role: "user",
+              parts: [
+                { inlineData: { mimeType: "image/jpeg", data: retryImages[retryIndex] } },
+                { text: mrzRetryPrompt }
+              ]
+            }],
+            config: { responseMimeType: "application/json" }
+          });
+          const retryText = retry.text?.trim();
+          if (!retryText) continue;
           const retryParsed = JSON.parse(retryText);
           const retryNormalized = normalizePassportScanResult({
             ...parsed,
@@ -372,7 +381,6 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
           if (retryNormalized.mrzDetected) {
             return res.json({ success: true, data: retryNormalized, model });
           }
-          return res.json({ success: true, data: normalized, model });
         }
 
         return res.json({ success: true, data: normalized, model });
