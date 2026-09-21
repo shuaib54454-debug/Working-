@@ -403,10 +403,33 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
     // 3) If localization fails, use a small deterministic fallback set.
     // This avoids the previous 60+ Tesseract attempts that could consume the
     // entire 90-second client timeout before Gemini ever got a chance to run.
-    const mrzFocusedImages = await buildMrzFocusedImages(rawBase64);
     let nativeVerifiedMrz: { line1: string; line2: string } | null = null;
 
-    if (ai) {
+    // Phase 1: run deterministic local OCR immediately on the original upload.
+    // Do not spend time generating six Sharp crops or calling Gemini before the
+    // cheapest checksum-verifiable path has had a chance to succeed.
+    try {
+      nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr([rawBase64]);
+    } catch (error) {
+      console.warn("Primary native MRZ OCR failed:", error instanceof Error ? error.message : "unknown error");
+    }
+
+    // Phase 2: only build additional crops if the fast native pass missed.
+    // This is important for composite uploads where the passport is only part
+    // of the frame, while keeping the common path very short.
+    let mrzFocusedImages: string[] = [];
+    if (!nativeVerifiedMrz) {
+      mrzFocusedImages = await buildMrzFocusedImages(rawBase64);
+      try {
+        nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr(mrzFocusedImages.slice(0, 2));
+      } catch (error) {
+        console.warn("Focused native MRZ OCR failed:", error instanceof Error ? error.message : "unknown error");
+      }
+    }
+
+    // Phase 3: Gemini localization is a fallback only. It is never required
+    // before the deterministic checksum-valid MRZ path.
+    if (!nativeVerifiedMrz && ai) {
       const locatedMrzImage = await locateMrzWithGemini(rawBase64, mimeType);
       if (locatedMrzImage) {
         try {
@@ -414,15 +437,6 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
         } catch (error) {
           console.warn("Located MRZ native OCR failed:", error instanceof Error ? error.message : "unknown error");
         }
-      }
-    }
-
-    if (!nativeVerifiedMrz) {
-      const nativeFallbackImages = [rawBase64, ...mrzFocusedImages.slice(0, 2)];
-      try {
-        nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr(nativeFallbackImages);
-      } catch (error) {
-        console.warn("Native MRZ fallback OCR failed:", error instanceof Error ? error.message : "unknown error");
       }
     }
 
