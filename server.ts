@@ -397,16 +397,33 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
     if (estimatedBytes > 8 * 1024 * 1024) {
       return res.status(413).json({ success: false, error: "Passport image is too large" });
     }
-    // Deterministic MRZ path runs independently of Gemini. It is the recovery path when
-    // Vision OCR cannot read the machine-readable zone. Acceptance still requires all ICAO
-    // TD3 check digits to validate; no MRZ is synthesized from visual fields.
+    // Fast MRZ strategy:
+    // 1) Let Gemini locate the MRZ first (one small request).
+    // 2) Run strict native OCR only on that localized crop.
+    // 3) If localization fails, use a small deterministic fallback set.
+    // This avoids the previous 60+ Tesseract attempts that could consume the
+    // entire 90-second client timeout before Gemini ever got a chance to run.
     const mrzFocusedImages = await buildMrzFocusedImages(rawBase64);
-    const nativeImages = [rawBase64, ...mrzFocusedImages];
     let nativeVerifiedMrz: { line1: string; line2: string } | null = null;
-    try {
-      nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr(nativeImages);
-    } catch (error) {
-      console.warn("Native MRZ OCR path failed:", error instanceof Error ? error.message : "unknown error");
+
+    if (ai) {
+      const locatedMrzImage = await locateMrzWithGemini(rawBase64, mimeType);
+      if (locatedMrzImage) {
+        try {
+          nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr([locatedMrzImage]);
+        } catch (error) {
+          console.warn("Located MRZ native OCR failed:", error instanceof Error ? error.message : "unknown error");
+        }
+      }
+    }
+
+    if (!nativeVerifiedMrz) {
+      const nativeFallbackImages = [rawBase64, ...mrzFocusedImages.slice(0, 2)];
+      try {
+        nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr(nativeFallbackImages);
+      } catch (error) {
+        console.warn("Native MRZ fallback OCR failed:", error instanceof Error ? error.message : "unknown error");
+      }
     }
 
     if (!ai) {
@@ -471,20 +488,9 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
       }
     }
 
-    // Native OCR did not find a verified MRZ. Only then use Gemini as a visual
-    // locator/recovery path, followed by strict native OCR or strict ICAO validation.
-    const locatedMrzImage = await locateMrzWithGemini(rawBase64, mimeType);
-    if (locatedMrzImage) {
-      try {
-        const locatedMrz = await extractVerifiedMrzWithNativeOcr([locatedMrzImage]);
-        if (locatedMrz) {
-          nativeVerifiedMrz = locatedMrz;
-        }
-      } catch (error) {
-        console.warn("Located MRZ native OCR failed:", error instanceof Error ? error.message : "unknown error");
-      }
-    }
-
+    // Native OCR did not find a verified MRZ. Gemini now acts only as the
+    // secondary strict MRZ/VIZ reader; any MRZ it returns still requires ICAO
+    // checksum validation before acceptance.
     const prompt = `Analyze this passport image for OCR and MRZ data. Never invent, repair, synthesize, reconstruct, or guess any MRZ characters or passport fields. Return JSON only using exactly these top-level keys: mrzLine1, mrzLine2, visualZone. visualZone must contain only visible fields: firstName, lastName, fullName, fullNameArabic, passportNumber, birthDate, expiryDate, gender, nationality, jobTitle. mrzLine1 and mrzLine2 must contain the two COMPLETE visible ICAO TD3 MRZ lines exactly as read, including < filler characters, with no spaces. If either MRZ line cannot be read completely, return that line as an empty string. Do not manufacture missing characters.`;
     const mrzRetryPrompt = `Read ONLY the Machine Readable Zone (MRZ) shown in this focused crop of the lower part of the passport page. Never guess, repair, reconstruct, or invent characters. Return JSON with exactly mrzLine1 and mrzLine2. Each value must be the complete visible ICAO TD3 line of exactly 44 characters with no spaces. If a complete line cannot be read with confidence, return an empty string for that line. Do not return partial or invented MRZ data.`;
     const models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
