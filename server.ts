@@ -425,9 +425,54 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
       return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
     }
 
-    // If generic lower-page crops miss the MRZ, use Gemini only as a visual
-    // locator. The returned crop is still OCR'd by Tesseract and must pass
-    // the strict ICAO checksum gate; Gemini never supplies MRZ characters.
+    // IMPORTANT: When native OCR has already produced a checksum-valid MRZ, do not
+    // spend additional requests locating/re-reading the MRZ. The MRZ is already verified;
+    // Gemini is used only once to extract VIZ fields. This keeps the production request
+    // comfortably within the client timeout and avoids turning a successful MRZ scan into
+    // a server-timeout failure.
+    if (nativeVerifiedMrz) {
+      const vizOnlyPrompt = `Analyze ONLY the visible/visual (VIZ) fields on this passport image. Do not read, return, repair, synthesize, reconstruct, or guess MRZ characters. Return JSON only with exactly one top-level key visualZone containing only these fields: firstName, lastName, fullName, fullNameArabic, passportNumber, birthDate, expiryDate, gender, nationality, jobTitle. Use only information visibly printed in the passport's visual zone. If a field is not clearly visible, return an empty string.`;
+      try {
+        const result = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: [{
+            role: "user",
+            parts: [
+              { inlineData: { mimeType, data: rawBase64 } },
+              { text: vizOnlyPrompt }
+            ]
+          }],
+          config: { responseMimeType: "application/json" }
+        });
+        const parsed = JSON.parse(result.text?.trim() || "{}");
+        const merged = normalizePassportScanResult({
+          ...parsed,
+          mrzLine1: nativeVerifiedMrz.line1,
+          mrzLine2: nativeVerifiedMrz.line2
+        });
+        return res.json({
+          success: true,
+          data: merged,
+          model: "gemini-2.5-flash+native-mrz-ocr",
+          mrzSource: "native-ocr-verified"
+        });
+      } catch (error) {
+        console.warn("Gemini VIZ extraction failed after verified native MRZ:", error instanceof Error ? error.message : "unknown error");
+        const fallbackData = normalizePassportScanResult({
+          mrzLine1: nativeVerifiedMrz.line1,
+          mrzLine2: nativeVerifiedMrz.line2
+        });
+        return res.json({
+          success: true,
+          data: fallbackData,
+          model: "native-mrz-ocr",
+          mrzSource: "native-ocr-verified"
+        });
+      }
+    }
+
+    // Native OCR did not find a verified MRZ. Only then use Gemini as a visual
+    // locator/recovery path, followed by strict native OCR or strict ICAO validation.
     const locatedMrzImage = await locateMrzWithGemini(rawBase64, mimeType);
     if (locatedMrzImage) {
       try {
