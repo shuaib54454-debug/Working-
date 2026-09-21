@@ -71,6 +71,35 @@ function candidateLines(raw: string): string[][] {
   return [[...first], [...second]];
 }
 
+const ICAO_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<".split("");
+
+function uniquelyRepairOneCharacter(line1: string, line2: string): { line1: string; line2: string } | null {
+  const solutions = new Set<string>();
+  const tryLine = (line: string, lineIndex: 1 | 2) => {
+    for (let position = 0; position < 44; position += 1) {
+      const original = line[position];
+      for (const replacement of ICAO_CHARS) {
+        if (replacement === original) continue;
+        const chars = line.split("");
+        chars[position] = replacement;
+        const candidate = chars.join("");
+        const parsed = lineIndex === 1
+          ? parseTD3MRZ(candidate, line2)
+          : parseTD3MRZ(line1, candidate);
+        if (parsed?.checksums.allValid) {
+          solutions.add(lineIndex === 1 ? `${candidate}|${line2}` : `${line1}|${candidate}`);
+          if (solutions.size > 1) return;
+        }
+      }
+    }
+  };
+  tryLine(line1, 1);
+  if (solutions.size <= 1) tryLine(line2, 2);
+  if (solutions.size !== 1) return null;
+  const [fixedLine1, fixedLine2] = [...solutions][0].split("|");
+  return { line1: fixedLine1, line2: fixedLine2 };
+}
+
 function validateCandidates(ocrText: string): { line1: string; line2: string } | null {
   const [first, second] = candidateLines(ocrText);
   for (const l1Raw of first) {
@@ -85,6 +114,13 @@ function validateCandidates(ocrText: string): { line1: string; line2: string } |
         if (parsed?.checksums.allValid) return { line1: l1, line2: l2 };
         const parsedRaw = parseTD3MRZ(l1, l2Raw);
         if (parsedRaw?.checksums.allValid) return { line1: l1, line2: l2Raw };
+
+        // Last-resort OCR correction: try exactly one character replacement and
+        // accept it only when the complete ICAO checksum system yields one unique solution.
+        const repaired = uniquelyRepairOneCharacter(l1, l2);
+        if (repaired) return repaired;
+        const repairedRaw = uniquelyRepairOneCharacter(l1, l2Raw);
+        if (repairedRaw) return repairedRaw;
       }
     }
   }
