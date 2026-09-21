@@ -242,26 +242,44 @@ async function buildMrzFocusedImages(rawBase64: string): Promise<string[]> {
     const metadata = await sharp(input).metadata();
     const width = metadata.width;
     const height = metadata.height;
-    if (!width || !height || height < 200) return null;
+    if (!width || !height || height < 200) return [];
+
     const outputs: string[] = [];
-    for (const ratio of [0.45, 0.55, 0.62]) {
-      const top = Math.max(0, Math.floor(height * ratio));
-      const cropHeight = height - top;
-      if (cropHeight < 80) continue;
+    const addCrop = async (left: number, top: number, cropWidth: number, cropHeight: number) => {
+      if (cropWidth < 120 || cropHeight < 80) return;
       const output = await sharp(input)
-        .extract({ left: 0, top, width, height: cropHeight })
-        .resize({ width: Math.min(Math.max(width, 1800), 3000), withoutEnlargement: false })
+        .extract({
+          left: Math.max(0, Math.floor(left)),
+          top: Math.max(0, Math.floor(top)),
+          width: Math.min(Math.floor(cropWidth), width - Math.max(0, Math.floor(left))),
+          height: Math.min(Math.floor(cropHeight), height - Math.max(0, Math.floor(top)))
+        })
+        .resize({ width: Math.min(Math.max(Math.floor(cropWidth), 1800), 3200), withoutEnlargement: false })
         .grayscale()
         .normalize()
         .sharpen({ sigma: 1.2 })
         .jpeg({ quality: 97, chromaSubsampling: "4:4:4" })
         .toBuffer();
       outputs.push(output.toString("base64"));
+    };
+
+    // Try the lower part of the whole image, plus lower-left/lower-center crops.
+    // Passport scans are often composite images where the passport page occupies
+    // only part of the frame; isolating that region gives Gemini a much larger MRZ.
+    for (const ratio of [0.38, 0.48, 0.58]) {
+      const top = Math.floor(height * ratio);
+      await addCrop(0, top, width, height - top);
     }
+
+    const lowerTop = Math.floor(height * 0.35);
+    await addCrop(0, lowerTop, Math.floor(width * 0.72), height - lowerTop);
+    await addCrop(Math.floor(width * 0.08), lowerTop, Math.floor(width * 0.62), height - lowerTop);
+    await addCrop(Math.floor(width * 0.25), lowerTop, Math.floor(width * 0.70), height - lowerTop);
+
     return outputs;
   } catch (error) {
     console.warn("Could not prepare focused MRZ images:", error instanceof Error ? error.message : "unknown error");
-    return null;
+    return [];
   }
 }
 const geminiKey = process.env.GEMINI_API_KEY;
