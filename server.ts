@@ -409,7 +409,21 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
       console.warn("Native MRZ OCR path failed:", error instanceof Error ? error.message : "unknown error");
     }
 
-    if (!ai) return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
+    if (!ai) {
+      if (nativeVerifiedMrz) {
+        const fallbackData = normalizePassportScanResult({
+          mrzLine1: nativeVerifiedMrz.line1,
+          mrzLine2: nativeVerifiedMrz.line2
+        });
+        return res.json({
+          success: true,
+          data: fallbackData,
+          model: "native-mrz-ocr",
+          mrzSource: "native-ocr-verified"
+        });
+      }
+      return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
+    }
 
     // If generic lower-page crops miss the MRZ, use Gemini only as a visual
     // locator. The returned crop is still OCR'd by Tesseract and must pass
