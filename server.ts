@@ -402,12 +402,9 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
     // TD3 check digits to validate; no MRZ is synthesized from visual fields.
     const mrzFocusedImages = await buildMrzFocusedImages(rawBase64);
     const nativeImages = [rawBase64, ...mrzFocusedImages];
+    let nativeVerifiedMrz: { line1: string; line2: string } | null = null;
     try {
-      const nativeMrz = await extractVerifiedMrzWithNativeOcr(nativeImages);
-      if (nativeMrz) {
-        const verifiedData = normalizePassportScanResult({ mrzLine1: nativeMrz.line1, mrzLine2: nativeMrz.line2 });
-        return res.json({ success: true, data: verifiedData, model: "native-mrz-ocr", mrzSource: "native-ocr-verified" });
-      }
+      nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr(nativeImages);
     } catch (error) {
       console.warn("Native MRZ OCR path failed:", error instanceof Error ? error.message : "unknown error");
     }
@@ -422,16 +419,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
       try {
         const locatedMrz = await extractVerifiedMrzWithNativeOcr([locatedMrzImage]);
         if (locatedMrz) {
-          const verifiedData = normalizePassportScanResult({
-            mrzLine1: locatedMrz.line1,
-            mrzLine2: locatedMrz.line2
-          });
-          return res.json({
-            success: true,
-            data: verifiedData,
-            model: "gemini-mrz-locator+native-ocr",
-            mrzSource: "native-ocr-verified"
-          });
+          nativeVerifiedMrz = locatedMrz;
         }
       } catch (error) {
         console.warn("Located MRZ native OCR failed:", error instanceof Error ? error.message : "unknown error");
@@ -463,6 +451,20 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
 
         // Gemini is still used for VIZ and as a secondary MRZ reader, but its MRZ is
         // accepted only after the same strict ICAO parser/checksum gate.
+        if (nativeVerifiedMrz) {
+          const merged = normalizePassportScanResult({
+            ...parsed,
+            mrzLine1: nativeVerifiedMrz.line1,
+            mrzLine2: nativeVerifiedMrz.line2
+          });
+          return res.json({
+            success: true,
+            data: merged,
+            model: nativeVerifiedMrz === nativeVerifiedMrz ? `${model}+native-mrz-ocr` : model,
+            mrzSource: "native-ocr-verified"
+          });
+        }
+
         if (normalized.mrzDetected) {
           const parsedMrz = parseTD3MRZ(normalized.mrzLine1 || "", normalized.mrzLine2 || "");
           if (parsedMrz?.checksums.allValid) {
@@ -500,6 +502,19 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
           }
         }
 
+        if (nativeVerifiedMrz) {
+          const merged = normalizePassportScanResult({
+            ...parsed,
+            mrzLine1: nativeVerifiedMrz.line1,
+            mrzLine2: nativeVerifiedMrz.line2
+          });
+          return res.json({
+            success: true,
+            data: merged,
+            model: `${model}+native-mrz-ocr`,
+            mrzSource: "native-ocr-verified"
+          });
+        }
         return res.json({ success: true, data: normalized, model });
       } catch (error) {
         lastError = error;
@@ -508,6 +523,18 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
     }
 
     console.error("All Gemini passport scan models failed:", lastError instanceof Error ? lastError.message : "unknown error");
+    if (nativeVerifiedMrz) {
+      const fallbackData = normalizePassportScanResult({
+        mrzLine1: nativeVerifiedMrz.line1,
+        mrzLine2: nativeVerifiedMrz.line2
+      });
+      return res.json({
+        success: true,
+        data: fallbackData,
+        model: "native-mrz-ocr",
+        mrzSource: "native-ocr-verified"
+      });
+    }
     return res.status(502).json({ success: false, error: "Passport scanning service failed" });
   } catch (error) {
     console.error("Passport scan request failed:", error instanceof Error ? error.message : "unknown error");
