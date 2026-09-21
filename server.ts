@@ -5,6 +5,7 @@ import path from "path";
 import { createVerify } from "crypto";
 import { getAuth } from "firebase-admin/auth";
 import { initializeApp, cert, getApps, App as FirebaseAdminApp } from "firebase-admin/app";
+import sharp from "sharp";
 
 const rootDir = process.cwd();
 const distPath = path.join(rootDir, "dist");
@@ -235,6 +236,27 @@ function normalizePassportScanResult(raw: any) {
   };
 }
 
+async function buildMrzFocusedImage(rawBase64: string): Promise<string | null> {
+  try {
+    const input = Buffer.from(rawBase64, "base64");
+    const metadata = await sharp(input).metadata();
+    const width = metadata.width;
+    const height = metadata.height;
+    if (!width || !height || height < 200) return null;
+    const top = Math.max(0, Math.floor(height * 0.55));
+    const cropHeight = height - top;
+    const output = await sharp(input)
+      .extract({ left: 0, top, width, height: cropHeight })
+      .resize({ width: Math.min(Math.max(width, 1600), 2600), withoutEnlargement: false })
+      .sharpen({ sigma: 1.2 })
+      .jpeg({ quality: 95, chromaSubsampling: "4:4:4" })
+      .toBuffer();
+    return output.toString("base64");
+  } catch (error) {
+    console.warn("Could not prepare focused MRZ image:", error instanceof Error ? error.message : "unknown error");
+    return null;
+  }
+}
 const geminiKey = process.env.GEMINI_API_KEY;
 const ai = geminiKey ? new GoogleGenAI({ apiKey: geminiKey }) : null;
 
@@ -300,7 +322,8 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
     if (!ai) return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
 
     const prompt = `Analyze this passport image for OCR and MRZ data. Never invent, repair, synthesize, reconstruct, or guess any MRZ characters or passport fields. Return JSON only using exactly these top-level keys: mrzLine1, mrzLine2, visualZone. visualZone must contain only visible fields: firstName, lastName, fullName, fullNameArabic, passportNumber, birthDate, expiryDate, gender, nationality, jobTitle. mrzLine1 and mrzLine2 must contain the two COMPLETE visible ICAO TD3 MRZ lines exactly as read, including < filler characters, with no spaces. If either MRZ line cannot be read completely, return that line as an empty string. Do not manufacture missing characters.`;
-    const mrzRetryPrompt = `Read ONLY the Machine Readable Zone (MRZ) at the bottom of this passport image. Never guess or repair characters. Return JSON with exactly mrzLine1 and mrzLine2. Each value must be the complete visible ICAO TD3 line of exactly 44 characters with no spaces. If a complete line cannot be read with confidence, return an empty string for that line. Do not return partial or invented MRZ data.`;
+    const mrzRetryPrompt = `Read ONLY the Machine Readable Zone (MRZ) shown in this focused crop of the lower part of the passport page. Never guess, repair, reconstruct, or invent characters. Return JSON with exactly mrzLine1 and mrzLine2. Each value must be the complete visible ICAO TD3 line of exactly 44 characters with no spaces. If a complete line cannot be read with confidence, return an empty string for that line. Do not return partial or invented MRZ data.`;
+    const mrzFocusedBase64 = await buildMrzFocusedImage(rawBase64);
     const models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
     let lastError: unknown = null;
 
@@ -331,7 +354,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
           contents: [{
             role: "user",
             parts: [
-              { inlineData: { mimeType, data: rawBase64 } },
+              { inlineData: { mimeType: "image/jpeg", data: mrzFocusedBase64 || rawBase64 } },
               { text: mrzRetryPrompt }
             ]
           }],
