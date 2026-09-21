@@ -460,7 +460,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
           return res.json({
             success: true,
             data: merged,
-            model: nativeVerifiedMrz === nativeVerifiedMrz ? `${model}+native-mrz-ocr` : model,
+            model: `${model}+native-mrz-ocr`,
             mrzSource: "native-ocr-verified"
           });
         }
