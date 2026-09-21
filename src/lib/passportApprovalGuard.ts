@@ -1,5 +1,6 @@
 export interface PassportApprovalInput {
   hasVerifiedMrz: boolean;
+  allowVisualData?: boolean;
   passportNumber: string;
   firstName: string;
   lastName: string;
@@ -95,8 +96,8 @@ export const parseStrictDate = (value: string): Date | null => {
 };
 
 export function canApprovePassportData(input: PassportApprovalInput): PassportApprovalResult {
-  if (!input.hasVerifiedMrz) {
-    return { allowed: false, reason: "لا يمكن اعتماد بيانات الجواز بدون MRZ موثّق." };
+  if (!input.hasVerifiedMrz && !input.allowVisualData) {
+    return { allowed: false, reason: "لا يمكن اعتماد بيانات الجواز قبل التعرف على صفحة الجواز." };
   }
 
   const fName = (input.firstName || "").trim();
