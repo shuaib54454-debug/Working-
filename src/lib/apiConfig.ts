@@ -41,7 +41,7 @@ export function getCandidateBackendUrls(): string[] {
     !window.location?.origin?.includes("127.0.0.1");
 
   // Production web and native clients use the fixed, application-controlled
-  // Cloud Run backend. This is critical for Firebase Hosting: Hosting serves
+  // Render backend. This is critical for Firebase Hosting: Hosting serves
   // the SPA statically, so /api/* is not a backend route there.
   if (isBrowserProduction || isCapacitor) {
     candidates.push(RENDER_BACKEND);
