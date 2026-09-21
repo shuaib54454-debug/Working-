@@ -181,6 +181,60 @@ async function verifyPassportScanAuth(req: express.Request, res: express.Respons
   }
 }
 
+function normalizePassportScanResult(raw: any) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const mrz = source.mrz && typeof source.mrz === "object" ? source.mrz : {};
+  const visual = source.visualZone && typeof source.visualZone === "object"
+    ? source.visualZone
+    : source.visual && typeof source.visual === "object"
+      ? source.visual
+      : {};
+
+  const cleanMrzLine = (value: unknown) => {
+    if (typeof value !== "string") return "";
+    return value.replace(/\s+/g, "").toUpperCase();
+  };
+
+  const line1 = cleanMrzLine([
+    source.mrzLine1, source.mrz_line1, source.line1,
+    mrz.mrzLine1, mrz.mrz_line1, mrz.line1, mrz.line_1
+  ].find((value: unknown) => typeof value === "string"));
+  const line2 = cleanMrzLine([
+    source.mrzLine2, source.mrz_line2, source.line2,
+    mrz.mrzLine2, mrz.mrz_line2, mrz.line2, mrz.line_2
+  ].find((value: unknown) => typeof value === "string"));
+
+  const hasCompleteMrz =
+    line1.length === 44 &&
+    line2.length === 44 &&
+    line1.startsWith("P<") &&
+    /^[A-Z0-9<]+$/.test(line1) &&
+    /^[A-Z0-9<]+$/.test(line2);
+
+  const cleanText = (value: unknown) =>
+    typeof value === "string" && value.trim() && value.trim().toLowerCase() !== "null"
+      ? value.trim()
+      : undefined;
+
+  return {
+    mrzLine1: hasCompleteMrz ? line1 : undefined,
+    mrzLine2: hasCompleteMrz ? line2 : undefined,
+    visualZone: {
+      firstName: cleanText(visual.firstName ?? source.firstName),
+      lastName: cleanText(visual.lastName ?? source.lastName),
+      fullName: cleanText(visual.fullName ?? source.fullName),
+      fullNameArabic: cleanText(visual.fullNameArabic ?? source.fullNameArabic),
+      passportNumber: cleanText(visual.passportNumber ?? source.passportNumber),
+      birthDate: cleanText(visual.birthDate ?? source.birthDate),
+      expiryDate: cleanText(visual.expiryDate ?? source.expiryDate),
+      gender: cleanText(visual.gender ?? source.gender),
+      nationality: cleanText(visual.nationality ?? source.nationality),
+      jobTitle: cleanText(visual.jobTitle ?? source.jobTitle)
+    },
+    mrzDetected: hasCompleteMrz
+  };
+}
+
 const geminiKey = process.env.GEMINI_API_KEY;
 const ai = geminiKey ? new GoogleGenAI({ apiKey: geminiKey }) : null;
 
@@ -245,7 +299,8 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
     }
     if (!ai) return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
 
-    const prompt = `Analyze this passport image for OCR and MRZ data. Never invent, repair, synthesize, reconstruct, or guess any MRZ characters or passport fields. Return JSON only. Set overallStatus to VERIFIED only when a complete visible MRZ is present and all check digits/checksums validate. If the MRZ is missing, incomplete, unreadable, or invalid, return overallStatus as NEEDS_REVIEW and preserve uncertainty rather than fabricating values. Extract visible fields only: passportNumber, surname, givenNames, nationality, dateOfBirth, sex, dateOfExpiry, issuingCountry, mrz, and confidence.`;
+    const prompt = \`Analyze this passport image for OCR and MRZ data. Never invent, repair, synthesize, reconstruct, or guess any MRZ characters or passport fields. Return JSON only using exactly these top-level keys: mrzLine1, mrzLine2, visualZone. visualZone must contain only visible fields: firstName, lastName, fullName, fullNameArabic, passportNumber, birthDate, expiryDate, gender, nationality, jobTitle. mrzLine1 and mrzLine2 must contain the two COMPLETE visible ICAO TD3 MRZ lines exactly as read, including < filler characters, with no spaces. If either MRZ line cannot be read completely, return that line as an empty string. Do not manufacture missing characters.\`;
+    const mrzRetryPrompt = \`Read ONLY the Machine Readable Zone (MRZ) at the bottom of this passport image. Never guess or repair characters. Return JSON with exactly mrzLine1 and mrzLine2. Each value must be the complete visible ICAO TD3 line of exactly 44 characters with no spaces. If a complete line cannot be read with confidence, return an empty string for that line. Do not return partial or invented MRZ data.\`;
     const models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
     let lastError: unknown = null;
 
@@ -265,10 +320,42 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
         const text = result.text?.trim();
         if (!text) throw new Error("Empty Gemini response");
         const parsed = JSON.parse(text);
-        return res.json({ success: true, data: parsed, model });
+        const normalized = normalizePassportScanResult(parsed);
+
+        if (normalized.mrzDetected) {
+          return res.json({ success: true, data: normalized, model });
+        }
+
+        const retry = await ai.models.generateContent({
+          model,
+          contents: [{
+            role: "user",
+            parts: [
+              { inlineData: { mimeType, data: rawBase64 } },
+              { text: mrzRetryPrompt }
+            ]
+          }],
+          config: { responseMimeType: "application/json" }
+        });
+        const retryText = retry.text?.trim();
+        if (retryText) {
+          const retryParsed = JSON.parse(retryText);
+          const retryNormalized = normalizePassportScanResult({
+            ...parsed,
+            mrzLine1: retryParsed?.mrzLine1 ?? retryParsed?.line1,
+            mrzLine2: retryParsed?.mrzLine2 ?? retryParsed?.line2,
+            mrz: retryParsed?.mrz
+          });
+          if (retryNormalized.mrzDetected) {
+            return res.json({ success: true, data: retryNormalized, model });
+          }
+          return res.json({ success: true, data: normalized, model });
+        }
+
+        return res.json({ success: true, data: normalized, model });
       } catch (error) {
         lastError = error;
-        console.warn(`Gemini passport scan failed for ${model}:`, error instanceof Error ? error.message : "unknown error");
+        console.warn(\`Gemini passport scan failed for \${model}:\`, error instanceof Error ? error.message : "unknown error");
       }
     }
 
