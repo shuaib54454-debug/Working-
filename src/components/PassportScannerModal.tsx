@@ -189,7 +189,25 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
         return;
       }
 
-      const extractedData = res.data.data || {};
+      // postJsonToApi wraps the server JSON in its own `data` field.
+      // Keep the extraction payload explicit so TypeScript cannot confuse the
+      // transport envelope with the passport extraction object.
+      const extractedData = ((res.data as any)?.data ?? {}) as {
+        mrzLine1?: string;
+        mrzLine2?: string;
+        visualZone?: {
+          firstName?: string;
+          lastName?: string;
+          fullName?: string;
+          fullNameArabic?: string;
+          passportNumber?: string;
+          birthDate?: string;
+          expiryDate?: string;
+          gender?: string;
+          nationality?: string;
+          jobTitle?: string;
+        };
+      };
       const vz = extractedData.visualZone || {};
       const line1 = extractedData.mrzLine1 || "";
       const line2 = extractedData.mrzLine2 || "";
