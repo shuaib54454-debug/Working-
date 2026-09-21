@@ -287,7 +287,7 @@ async function buildMrzFocusedImages(rawBase64: string): Promise<string[]> {
 const geminiKey = process.env.GEMINI_API_KEY;
 const ai = geminiKey ? new GoogleGenAI({ apiKey: geminiKey }) : null;
 
-async function locateMrzWithGemini(base64: string): Promise<string | null> {
+async function locateMrzWithGemini(base64: string, mimeType: string): Promise<string | null> {
   if (!ai) return null;
   try {
     const result = await ai.models.generateContent({
@@ -295,7 +295,7 @@ async function locateMrzWithGemini(base64: string): Promise<string | null> {
       contents: [{
         role: "user",
         parts: [
-          { inlineData: { mimeType: "image/jpeg", data: base64 } },
+          { inlineData: { mimeType, data: base64 } },
           { text: "Locate ONLY the two-line ICAO TD3 Machine Readable Zone (MRZ) on this passport image. Do not read or return any passport data. Return JSON only: {x,y,width,height,confidence}. Coordinates must be normalized 0..1 relative to the full image and form a tight rectangle around BOTH MRZ lines, including a small margin. If no MRZ is visible, return width:0,height:0,confidence:0. Do not invent a location." }
         ]
       }],
@@ -417,7 +417,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
     // If generic lower-page crops miss the MRZ, use Gemini only as a visual
     // locator. The returned crop is still OCR'd by Tesseract and must pass
     // the strict ICAO checksum gate; Gemini never supplies MRZ characters.
-    const locatedMrzImage = await locateMrzWithGemini(rawBase64);
+    const locatedMrzImage = await locateMrzWithGemini(rawBase64, mimeType);
     if (locatedMrzImage) {
       try {
         const locatedMrz = await extractVerifiedMrzWithNativeOcr([locatedMrzImage]);
