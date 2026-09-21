@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: working-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: OWNER_EMAIL
+        value: shuayb54454@gmail.com
+      - key: FIREBASE_PROJECT_ID
+        value: crack-petal-506818-c8
+      - key: ALLOWED_ORIGINS
+        value: https://crack-petal-506818-c8.web.app,https://crack-petal-506818-c8.firebaseapp.com
+      - key: GEMINI_API_KEY
+        sync: false
