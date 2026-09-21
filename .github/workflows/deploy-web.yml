@@ -46,6 +46,40 @@ jobs:
       - name: Configure Google Cloud
         run: gcloud config set project crack-petal-506818-c8
 
+      - name: Verify Render backend and Firebase Hosting CORS
+        env:
+          API_BASE_URL: https://working-tkge.onrender.com
+          WEB_ORIGIN: https://crack-petal-506818-c8.web.app
+        run: |
+          set -euo pipefail
+          health_ok=false
+          for i in 1 2 3 4 5 6; do
+            status=$(curl -sS -o /tmp/render-health.json -w "%{http_code}" --max-time 90 "$API_BASE_URL/api/health" || true)
+            echo "Render health attempt $i: HTTP $status"
+            cat /tmp/render-health.json 2>/dev/null || true
+            if [ "$status" = "200" ] && grep -q '"status":"ok"' /tmp/render-health.json; then
+              health_ok=true
+              break
+            fi
+            sleep 10
+          done
+          if [ "$health_ok" != "true" ]; then
+            echo "ERROR: Render backend health check failed."
+            exit 1
+          fi
+
+          cors_headers=$(curl -sS -D - -o /dev/null -X OPTIONS \
+            -H "Origin: $WEB_ORIGIN" \
+            -H "Access-Control-Request-Method: POST" \
+            -H "Access-Control-Request-Headers: authorization,content-type" \
+            --max-time 60 "$API_BASE_URL/api/scan-passport")
+          echo "$cors_headers"
+          echo "$cors_headers" | grep -qi '^HTTP/.* 204'
+          echo "$cors_headers" | grep -qi "Access-Control-Allow-Origin: $WEB_ORIGIN"
+          echo "$cors_headers" | grep -qi "Access-Control-Allow-Methods:.*POST"
+          echo "$cors_headers" | grep -qi "Access-Control-Allow-Headers:.*Authorization"
+          echo "Render backend health and Firebase Hosting CORS checks passed."
+
       - name: Deploy Firebase Hosting
         run: npx --yes firebase-tools@latest deploy --only hosting:working --project crack-petal-506818-c8 --non-interactive
 
