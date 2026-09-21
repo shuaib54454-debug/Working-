@@ -27,34 +27,48 @@ function numericPositionNormalize(line: string): string {
 }
 
 function candidateLines(raw: string): string[][] {
-  const lines = raw.split(/\r?\n/).map(cleanOcr).filter(Boolean);
-  const expanded: string[] = [...lines];
+  const lines = raw
+    .split(/\r?\n/)
+    .map(cleanOcr)
+    .filter(Boolean);
+
+  const windows = new Set<string>();
   for (const line of lines) {
-    if (line.length >= 88) {
-      for (let i = 0; i + 44 <= line.length; i += 44) expanded.push(line.slice(i, i + 44));
+    if (line.length < 44) continue;
+    if (line.length === 44) {
+      windows.add(line);
+      continue;
+    }
+    // OCR may merge the two MRZ lines or add leading/trailing garbage.
+    // Search every 44-character window instead of assuming a line break.
+    for (let i = 0; i + 44 <= line.length; i += 1) {
+      windows.add(line.slice(i, i + 44));
     }
   }
 
-  const first: string[] = [];
-  const second: string[] = [];
-  for (const line of expanded) {
-    const p = line.indexOf("P<");
-    if (p >= 0 && line.length - p >= 44) first.push(line.slice(p, p + 44));
-    if (/^[A-Z0-9<]{44}$/.test(line)) second.push(line);
+  const first = new Set<string>();
+  const second = new Set<string>();
+
+  for (const window of windows) {
+    const p = window.indexOf("P<");
+    if (p === 0) first.add(window);
+    // Some OCR engines preserve the 44-char line but lose the line break.
+    if (/^[A-Z0-9<]{44}$/.test(window)) second.add(window);
   }
 
-  for (let i = 0; i < expanded.length; i++) {
-    const a = expanded[i];
-    const p = a.indexOf("P<");
-    if (p >= 0 && a.length - p >= 44) {
-      const l1 = a.slice(p, p + 44);
-      for (let j = i + 1; j < Math.min(i + 4, expanded.length); j++) {
-        if (expanded[j].length >= 44) second.push(expanded[j].slice(0, 44));
+  // If the first line's structural "P<" marker was misread, allow a single
+  // structural correction at position 2 only. No field values are synthesized.
+  for (const line of lines) {
+    if (line.length < 44) continue;
+    for (let i = 0; i + 44 <= line.length; i += 1) {
+      const window = line.slice(i, i + 44);
+      if (window[0] === "P" && window[1] !== "<") {
+        first.add("P<" + window.slice(2));
       }
-      first.push(l1);
     }
   }
-  return [[...new Set(first)], [...new Set(second)]];
+
+  return [[...first], [...second]];
 }
 
 function validateCandidates(ocrText: string): { line1: string; line2: string } | null {
@@ -103,12 +117,17 @@ export async function extractVerifiedMrzWithNativeOcr(base64Images: string[]): P
           const png = await preprocess(images[imageIndex], mode);
           const file = path.join(dir, `mrz-${imageIndex}-${mode}.png`);
           await writeFile(file, png);
-          const text = await execFileAsync("tesseract", [
-            file, "stdout", "--oem", "1", "-l", "eng", "--psm", "6",
-            "-c", "tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
-          ]);
-          const verified = validateCandidates(text);
-          if (verified) return verified;
+          const baseArgs = [
+            file, "stdout", "--oem", "1", "-l", "eng",
+            "-c", "tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<",
+            "-c", "load_system_dawg=0",
+            "-c", "load_freq_dawg=0"
+          ];
+          for (const psm of ["6", "11"]) {
+            const text = await execFileAsync("tesseract", [...baseArgs, "--psm", psm]);
+            const verified = validateCandidates(text);
+            if (verified) return verified;
+          }
         } catch (error) {
           console.warn("Native MRZ OCR attempt failed:", error instanceof Error ? error.message : "unknown error");
         }
