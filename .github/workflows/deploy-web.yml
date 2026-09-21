@@ -46,6 +46,26 @@ jobs:
       - name: Configure Google Cloud
         run: gcloud config set project crack-petal-506818-c8
 
+      - name: Verify Render API rejects unauthenticated scan requests as JSON
+        env:
+          API_BASE_URL: https://working-tkge.onrender.com
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -D /tmp/scan-headers -o /tmp/scan-body -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --data '{"imageBase64":"invalid","mimeType":"image/jpeg"}' \
+            --max-time 90 "$API_BASE_URL/api/scan-passport" || true)
+          echo "Unauthenticated scan endpoint status: $status"
+          echo "Response headers:"
+          cat /tmp/scan-headers
+          echo "Response body:"
+          cat /tmp/scan-body
+          test "$status" = "401"
+          grep -q '"error"' /tmp/scan-body
+          echo "Render scan endpoint returns a JSON 401 as expected."
+
       - name: Verify Render backend and Firebase Hosting CORS
         env:
           API_BASE_URL: https://working-tkge.onrender.com
