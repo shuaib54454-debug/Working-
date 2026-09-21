@@ -189,7 +189,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
         return;
       }
 
-      const extractedData = res.data;
+      const extractedData = res.data.data || {};
       const vz = extractedData.visualZone || {};
       const line1 = extractedData.mrzLine1 || "";
       const line2 = extractedData.mrzLine2 || "";
