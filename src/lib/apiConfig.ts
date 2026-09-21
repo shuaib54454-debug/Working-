@@ -53,8 +53,11 @@ export function getCandidateBackendUrls(): string[] {
     candidates.push(window.location.origin.replace(/\/$/, ""));
   }
 
-  // Relative path is the final same-origin fallback.
-  candidates.push("");
+  // Never fall back to the Firebase Hosting SPA in production: /api/* there
+  // can return index.html, which would mask a backend problem as a JSON parse error.
+  if (!isBrowserProduction && !isCapacitor) {
+    candidates.push("");
+  }
 
   return Array.from(new Set(candidates));
 }
@@ -128,26 +131,29 @@ export async function postJsonToApi<T = any>(
 
       clearTimeout(timeoutId);
 
-      if (response.ok) {
-        const json = await response.json();
-        return { success: true, data: json, status: response.status };
+      const contentType = response.headers.get("content-type") || "";
+      const rawBody = await response.text();
+      let parsedBody: any = null;
+      if (contentType.toLowerCase().includes("application/json")) {
+        try {
+          parsedBody = JSON.parse(rawBody);
+        } catch {
+          parsedBody = null;
+        }
       }
 
-      let errJson: any = null;
-      try {
-        errJson = await response.json();
-      } catch {
-        // Ignore non-JSON error responses.
+      if (response.ok && parsedBody !== null) {
+        return { success: true, data: parsedBody, status: response.status };
       }
 
       const errorMsg =
-        errJson?.error ||
-        `استجاب الخادم برمز الحالة ${response.status} (${response.statusText || "خطأ"})`;
+        parsedBody?.error ||
+        (response.ok
+          ? `الخادم أعاد استجابة غير JSON (${contentType || "نوع محتوى غير معروف"})`
+          : `استجاب الخادم برمز الحالة ${response.status} (${response.statusText || "خطأ"})`);
       lastErrorMsg = errorMsg;
       lastStatus = response.status;
 
-      // Client/authentication failures are deterministic; do not send the
-      // same authenticated request to another endpoint after a 4xx response.
       if (response.status >= 400 && response.status < 500) {
         return { success: false, error: errorMsg, status: response.status };
       }
