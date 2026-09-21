@@ -143,85 +143,107 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
   const processImageWithAI = async (imageDataUrl: string) => {
     const requestId = ++scanRequestIdRef.current;
     setIsProcessing(true);
-    setStatusMessage("جاري فحص الجواز بالذكاء الاصطناعي واستخراج البيانات...");
+    setStatusMessage("جاري التعرف على الجواز واستخراج البيانات...");
     setErrorMessage(null);
+
     try {
-      const optimizedImage = await compressImage(imageDataUrl, { maxWidth: 2200, maxHeight: 2200, quality: 0.92 });
+      // Send one optimized image. The server now uses one direct Gemini Vision
+      // request and treats MRZ as optional instead of making it a prerequisite.
+      const optimizedImage = await compressImage(imageDataUrl, {
+        maxWidth: 2200,
+        maxHeight: 2200,
+        quality: 0.92
+      });
       if (requestId !== scanRequestIdRef.current) return;
-      let extractedData: {
-        mrzLine1?: string; mrzLine2?: string;
-        visualZone?: { firstName?: string; lastName?: string; fullName?: string; fullNameArabic?: string; passportNumber?: string; birthDate?: string; expiryDate?: string; gender?: string; nationality?: string; jobTitle?: string; };
-      } | null = null;
-      const res = await postJsonToApi<{ success: boolean; data?: { mrzLine1?: string; mrzLine2?: string; visualZone?: { firstName?: string; lastName?: string; fullName?: string; fullNameArabic?: string; passportNumber?: string; birthDate?: string; expiryDate?: string; gender?: string; nationality?: string; jobTitle?: string; }; }; error?: string; }>("/api/scan-passport", { imageBase64: optimizedImage, mimeType: "image/jpeg" }, 90000);
+
+      const res = await postJsonToApi<{
+        success: boolean;
+        passportDetected?: boolean;
+        confidence?: number;
+        data?: {
+          mrzLine1?: string;
+          mrzLine2?: string;
+          visualZone?: {
+            firstName?: string;
+            lastName?: string;
+            fullName?: string;
+            fullNameArabic?: string;
+            passportNumber?: string;
+            birthDate?: string;
+            expiryDate?: string;
+            gender?: string;
+            nationality?: string;
+            jobTitle?: string;
+          };
+        };
+        error?: string;
+      }>("/api/scan-passport", {
+        imageBase64: optimizedImage,
+        mimeType: "image/jpeg"
+      }, 35000);
+
       if (requestId !== scanRequestIdRef.current) return;
-      if (res.success && res.data) {
-        extractedData = (res.data as any).data || res.data;
-      } else if (res.error) {
-        if (requestId !== scanRequestIdRef.current) return;
-        console.warn("Backend /api/scan-passport error:", res.error);
-        setErrorMessage(`فشل فحص الجواز من الخادم: ${res.error}`);
+
+      if (!res.success || !res.data) {
+        setErrorMessage(res.error || "لم يتم التعرف على بيانات الجواز. يرجى رفع صورة أوضح.");
         return;
       }
 
-      if (extractedData) {
-        const { mrzLine1: l1, mrzLine2: l2, visualZone } = extractedData;
-        const vz = visualZone || {};
-        const line1 = l1 || "";
-        const line2 = l2 || "";
-        let fName = vz.firstName || "";
-        let lName = vz.lastName || "";
-        if (!fName && !lName && (vz.fullName || vz.fullNameArabic)) {
-          const fullName = vz.fullNameArabic || vz.fullName || "";
-          const parts = fullName.trim().split(/\s+/);
-          if (parts.length > 1) { fName = parts.slice(0, -1).join(" "); lName = parts[parts.length - 1]; }
-          else { fName = fullName; lName = fullName; }
-          setVisualName(fullName);
-        }
-        const hasRealData = Boolean((fName && fName !== "null") || (lName && lName !== "null") || (vz.passportNumber && vz.passportNumber !== "null") || (line1 && line1.startsWith("P<")));
-        if (hasRealData) {
-          if (fName) setCandidateFirstName(fName);
-          if (lName) setCandidateLastName(lName);
-          if (vz.passportNumber) setVisualPassportNo(vz.passportNumber);
-          if (vz.birthDate) setVisualBirthDate(vz.birthDate);
-          if (vz.expiryDate) setVisualExpiryDate(vz.expiryDate);
-          if (vz.gender) setVisualGender(vz.gender === "female" ? "female" : "male");
-          if (vz.nationality) setVisualNationality(vz.nationality);
-          if (vz.jobTitle) setVisualJob(vz.jobTitle);
-          if (line1 && line2) {
-            const parsedMrz = parseTD3MRZ(line1, line2);
-            setMrzLine1(line1);
-            setMrzLine2(line2);
-            if (parsedMrz?.checksums.allValid) {
-              setStatusMessage("تم استخراج MRZ كامل والتحقق من جميع أرقام التحقق وفق ICAO 9303.");
-              setErrorMessage(null);
-            } else {
-              setStatusMessage(null);
-              setErrorMessage("تم استخراج سطري MRZ، لكن التحقق الرياضي لم ينجح. لا يمكن اعتماد البيانات قبل توفر MRZ حقيقي صالح.");
-            }
-          } else {
-            setMrzLine1("");
-            setMrzLine2("");
-            setAnalysis(null);
-            setStatusMessage(null);
-            setErrorMessage("تم استخراج البيانات البصرية، لكن لم يتم استخراج MRZ كامل من الصورة. لا يمكن اعتماد البيانات قبل توفر MRZ حقيقي صالح.");
-          }
+      const extractedData = res.data;
+      const vz = extractedData.visualZone || {};
+      const line1 = extractedData.mrzLine1 || "";
+      const line2 = extractedData.mrzLine2 || "";
+
+      let fName = vz.firstName || "";
+      let lName = vz.lastName || "";
+
+      if (!fName && !lName && (vz.fullName || vz.fullNameArabic)) {
+        const fullName = (vz.fullNameArabic || vz.fullName || "").trim();
+        const parts = fullName.split(/\s+/);
+        if (parts.length > 1) {
+          fName = parts.slice(0, -1).join(" ");
+          lName = parts[parts.length - 1];
         } else {
-          setMrzLine1("");
-          setMrzLine2("");
-          setAnalysis(null);
-          setStatusMessage(null);
-          setErrorMessage("تم استلام الصورة بنجاح، لكن لم يتم التعرف على بيانات جواز واضحة. يرجى رفع صورة أوضح.");
+          fName = fullName;
+          lName = fullName;
+        }
+        setVisualName(fullName);
+      }
+
+      if (fName) setCandidateFirstName(fName);
+      if (lName) setCandidateLastName(lName);
+      if (vz.passportNumber) setVisualPassportNo(vz.passportNumber);
+      if (vz.birthDate) setVisualBirthDate(normalizeDateToISO(vz.birthDate));
+      if (vz.expiryDate) setVisualExpiryDate(normalizeDateToISO(vz.expiryDate));
+      if (vz.gender) setVisualGender(vz.gender.toLowerCase().includes("female") || vz.gender.includes("أنث") ? "female" : "male");
+      if (vz.nationality) setVisualNationality(vz.nationality);
+      if (vz.jobTitle) setVisualJob(vz.jobTitle);
+
+      if (line1 && line2) {
+        const parsedMrz = parseTD3MRZ(line1, line2);
+        setMrzLine1(line1);
+        setMrzLine2(line2);
+
+        if (parsedMrz?.checksums.allValid) {
+          setStatusMessage("تم التعرف على الجواز وتسجيل البيانات والتحقق من MRZ.");
+        } else {
+          setStatusMessage("تم التعرف على الجواز وتسجيل البيانات.");
         }
       } else {
         setMrzLine1("");
         setMrzLine2("");
-        setAnalysis(null);
-        setErrorMessage("تنبيه: تعذر استخراج النص تلقائياً. لا يمكن اعتماد البيانات دون MRZ حقيقي متحقق منه.");
+        setStatusMessage("تم التعرف على الجواز وتسجيل البيانات بنجاح.");
       }
+
+      setErrorMessage(null);
     } catch (e: any) {
-      console.warn("AI scanning error:", e);
-      if (requestId === scanRequestIdRef.current) setErrorMessage("تعذر إكمال فحص الجواز. لا يمكن الاعتماد أو الاعتماد على بيانات يدوية دون MRZ حقيقي متحقق منه.");
-    } finally { setIsProcessing(false); }
+      console.warn("Passport scanning error:", e);
+      if (requestId === scanRequestIdRef.current) {
+        setErrorMessage(e?.message || "تعذر التعرف على الجواز. يرجى تجربة صورة أوضح.");
+      }
+    } finally {
+      if (requestId === scanRequestIdRef.current) setIsProcessing(false);
+    }
   };
 
   const loadSample = (sample: (typeof SAMPLE_PASSPORTS)[0]) => {
