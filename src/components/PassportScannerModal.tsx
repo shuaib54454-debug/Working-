@@ -34,6 +34,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
   const [visualNationality, setVisualNationality] = useState("المملكة العربية السعودية");
   const [visualJob, setVisualJob] = useState("عامل / عاملة");
   const [analysis, setAnalysis] = useState<PassportScanAnalysis | null>(null);
+  const scanRequestIdRef = useRef(0);
 
   const stopCamera = () => {
     if (streamRef.current) {
@@ -47,6 +48,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
   useEffect(() => { if (activeMode !== "CAMERA") stopCamera(); }, [activeMode]);
 
   const resetScanState = () => {
+    scanRequestIdRef.current += 1;
     setMrzLine1("");
     setMrzLine2("");
     setCandidateFirstName("");
@@ -139,19 +141,23 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
   };
 
   const processImageWithAI = async (imageDataUrl: string) => {
+    const requestId = ++scanRequestIdRef.current;
     setIsProcessing(true);
     setStatusMessage("جاري فحص الجواز بالذكاء الاصطناعي واستخراج البيانات...");
     setErrorMessage(null);
     try {
       const optimizedImage = await compressImage(imageDataUrl, { maxWidth: 2200, maxHeight: 2200, quality: 0.92 });
+      if (requestId !== scanRequestIdRef.current) return;
       let extractedData: {
         mrzLine1?: string; mrzLine2?: string;
         visualZone?: { firstName?: string; lastName?: string; fullName?: string; fullNameArabic?: string; passportNumber?: string; birthDate?: string; expiryDate?: string; gender?: string; nationality?: string; jobTitle?: string; };
       } | null = null;
       const res = await postJsonToApi<{ success: boolean; data?: { mrzLine1?: string; mrzLine2?: string; visualZone?: { firstName?: string; lastName?: string; fullName?: string; fullNameArabic?: string; passportNumber?: string; birthDate?: string; expiryDate?: string; gender?: string; nationality?: string; jobTitle?: string; }; }; error?: string; }>("/api/scan-passport", { imageBase64: optimizedImage, mimeType: "image/jpeg" }, 90000);
+      if (requestId !== scanRequestIdRef.current) return;
       if (res.success && res.data) {
         extractedData = (res.data as any).data || res.data;
       } else if (res.error) {
+        if (requestId !== scanRequestIdRef.current) return;
         console.warn("Backend /api/scan-passport error:", res.error);
         setErrorMessage(`فشل فحص الجواز من الخادم: ${res.error}`);
         return;
@@ -208,7 +214,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       }
     } catch (e: any) {
       console.warn("AI scanning error:", e);
-      setErrorMessage("تعذر إكمال فحص الجواز. لا يمكن الاعتماد أو الاعتماد على بيانات يدوية دون MRZ حقيقي متحقق منه.");
+      if (requestId === scanRequestIdRef.current) setErrorMessage("تعذر إكمال فحص الجواز. لا يمكن الاعتماد أو الاعتماد على بيانات يدوية دون MRZ حقيقي متحقق منه.");
     } finally { setIsProcessing(false); }
   };
 
