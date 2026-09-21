@@ -6,6 +6,7 @@ import { createVerify } from "crypto";
 import { getAuth } from "firebase-admin/auth";
 import { initializeApp, cert, getApps, App as FirebaseAdminApp } from "firebase-admin/app";
 import sharp from "sharp";
+import { extractVerifiedMrzWithNativeOcr } from "./server/mrzOcr";
 
 const rootDir = process.cwd();
 const distPath = path.join(rootDir, "dist");
@@ -371,7 +372,26 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
         const normalized = normalizePassportScanResult(parsed);
 
         if (normalized.mrzDetected) {
-          return res.json({ success: true, data: normalized, model });
+          // Native OCR fallback: use deterministic image preprocessing + Tesseract, then
+        // accept a result only when the strict ICAO TD3 parser validates every check digit.
+        // Gemini remains useful for VIZ extraction, but it is no longer the sole MRZ reader.
+        const nativeImages = [rawBase64, ...mrzFocusedImages];
+        const nativeMrz = await extractVerifiedMrzWithNativeOcr(nativeImages);
+        if (nativeMrz) {
+          const verifiedData = normalizePassportScanResult({
+            ...parsed,
+            mrzLine1: nativeMrz.line1,
+            mrzLine2: nativeMrz.line2
+          });
+          return res.json({
+            success: true,
+            data: verifiedData,
+            model: `${model}+native-mrz-ocr`,
+            mrzSource: "native-ocr-verified"
+          });
+        }
+
+        return res.json({ success: true, data: normalized, model });
         }
 
         const retryImages = mrzFocusedImages.length > 0 ? mrzFocusedImages : [rawBase64];
