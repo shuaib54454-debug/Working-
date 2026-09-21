@@ -3,13 +3,12 @@ import { Capacitor } from "@capacitor/core";
 import { auth } from "./firebase";
 
 /**
- * Cloud Run Production / Live Applet Backend URLs.
+ * Render Production Backend URL.
  * These are intentionally fixed in application code; authenticated API
  * requests must never be redirected to an arbitrary URL from localStorage.
  */
-export const CLOUD_RUN_DEV_BACKEND = "https://ais-dev-lcyhq5hqe53iw7xy4xblqz-343361401430.europe-west2.run.app";
-export const CLOUD_RUN_PRE_BACKEND = "https://ais-pre-lcyhq5hqe53iw7xy4xblqz-343361401430.europe-west2.run.app";
-export const DEFAULT_PRODUCTION_BACKEND = CLOUD_RUN_DEV_BACKEND;
+export const RENDER_BACKEND = "https://working-api.onrender.com";
+export const DEFAULT_PRODUCTION_BACKEND = RENDER_BACKEND;
 
 function isHttpUrl(value: unknown): value is string {
   return typeof value === "string" && /^https:\/\//i.test(value.trim());
@@ -45,8 +44,7 @@ export function getCandidateBackendUrls(): string[] {
   // Cloud Run backend. This is critical for Firebase Hosting: Hosting serves
   // the SPA statically, so /api/* is not a backend route there.
   if (isBrowserProduction || isCapacitor) {
-    candidates.push(CLOUD_RUN_DEV_BACKEND);
-    candidates.push(CLOUD_RUN_PRE_BACKEND);
+    candidates.push(RENDER_BACKEND);
   }
 
   // Local development keeps the API same-origin because server.ts hosts both
