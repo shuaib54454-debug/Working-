@@ -124,7 +124,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
     setStatusMessage("جاري فحص الجواز بالذكاء الاصطناعي واستخراج البيانات...");
     setErrorMessage(null);
     try {
-      const optimizedImage = await compressImage(imageDataUrl, { maxWidth: 1600, maxHeight: 1600, quality: 0.85 });
+      const optimizedImage = await compressImage(imageDataUrl, { maxWidth: 2200, maxHeight: 2200, quality: 0.92 });
       let extractedData: {
         mrzLine1?: string; mrzLine2?: string;
         visualZone?: { firstName?: string; lastName?: string; fullName?: string; fullNameArabic?: string; passportNumber?: string; birthDate?: string; expiryDate?: string; gender?: string; nationality?: string; jobTitle?: string; };
