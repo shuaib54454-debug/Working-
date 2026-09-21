@@ -287,6 +287,57 @@ async function buildMrzFocusedImages(rawBase64: string): Promise<string[]> {
 const geminiKey = process.env.GEMINI_API_KEY;
 const ai = geminiKey ? new GoogleGenAI({ apiKey: geminiKey }) : null;
 
+async function locateMrzWithGemini(base64: string): Promise<string | null> {
+  if (!ai) return null;
+  try {
+    const result = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{
+        role: "user",
+        parts: [
+          { inlineData: { mimeType: "image/jpeg", data: base64 } },
+          { text: "Locate ONLY the two-line ICAO TD3 Machine Readable Zone (MRZ) on this passport image. Do not read or return any passport data. Return JSON only: {x,y,width,height,confidence}. Coordinates must be normalized 0..1 relative to the full image and form a tight rectangle around BOTH MRZ lines, including a small margin. If no MRZ is visible, return width:0,height:0,confidence:0. Do not invent a location." }
+        ]
+      }],
+      config: { responseMimeType: "application/json" }
+    });
+    const parsed = JSON.parse(result.text?.trim() || "{}");
+    const x = Number(parsed.x);
+    const y = Number(parsed.y);
+    const width = Number(parsed.width);
+    const height = Number(parsed.height);
+    const confidence = Number(parsed.confidence);
+    if (![x, y, width, height, confidence].every(Number.isFinite)) return null;
+    if (confidence < 0.5 || width <= 0 || height <= 0) return null;
+    if (x < 0 || y < 0 || x + width > 1 || y + height > 1) return null;
+
+    const input = Buffer.from(base64, "base64");
+    const metadata = await sharp(input).metadata();
+    const imageWidth = metadata.width || 0;
+    const imageHeight = metadata.height || 0;
+    if (!imageWidth || !imageHeight) return null;
+
+    const left = Math.max(0, Math.floor(imageWidth * x));
+    const top = Math.max(0, Math.floor(imageHeight * y));
+    const cropWidth = Math.min(imageWidth - left, Math.max(160, Math.floor(imageWidth * width)));
+    const cropHeight = Math.min(imageHeight - top, Math.max(90, Math.floor(imageHeight * height)));
+    if (cropWidth < 160 || cropHeight < 90) return null;
+
+    const output = await sharp(input)
+      .extract({ left, top, width: cropWidth, height: cropHeight })
+      .resize({ width: 3200, withoutEnlargement: false })
+      .grayscale()
+      .normalize()
+      .sharpen({ sigma: 1.4 })
+      .jpeg({ quality: 100, chromaSubsampling: "4:4:4" })
+      .toBuffer();
+    return output.toString("base64");
+  } catch (error) {
+    console.warn("Gemini MRZ localization failed:", error instanceof Error ? error.message : "unknown error");
+    return null;
+  }
+}
+
 // CORS is allowlisted. Never reflect an arbitrary Origin while credentials are enabled.
 const configuredOrigins = String(process.env.ALLOWED_ORIGINS || "")
   .split(",")
@@ -362,6 +413,30 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
     }
 
     if (!ai) return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
+
+    // If generic lower-page crops miss the MRZ, use Gemini only as a visual
+    // locator. The returned crop is still OCR'd by Tesseract and must pass
+    // the strict ICAO checksum gate; Gemini never supplies MRZ characters.
+    const locatedMrzImage = await locateMrzWithGemini(rawBase64);
+    if (locatedMrzImage) {
+      try {
+        const locatedMrz = await extractVerifiedMrzWithNativeOcr([locatedMrzImage]);
+        if (locatedMrz) {
+          const verifiedData = normalizePassportScanResult({
+            mrzLine1: locatedMrz.line1,
+            mrzLine2: locatedMrz.line2
+          });
+          return res.json({
+            success: true,
+            data: verifiedData,
+            model: "gemini-mrz-locator+native-ocr",
+            mrzSource: "native-ocr-verified"
+          });
+        }
+      } catch (error) {
+        console.warn("Located MRZ native OCR failed:", error instanceof Error ? error.message : "unknown error");
+      }
+    }
 
     const prompt = `Analyze this passport image for OCR and MRZ data. Never invent, repair, synthesize, reconstruct, or guess any MRZ characters or passport fields. Return JSON only using exactly these top-level keys: mrzLine1, mrzLine2, visualZone. visualZone must contain only visible fields: firstName, lastName, fullName, fullNameArabic, passportNumber, birthDate, expiryDate, gender, nationality, jobTitle. mrzLine1 and mrzLine2 must contain the two COMPLETE visible ICAO TD3 MRZ lines exactly as read, including < filler characters, with no spaces. If either MRZ line cannot be read completely, return that line as an empty string. Do not manufacture missing characters.`;
     const mrzRetryPrompt = `Read ONLY the Machine Readable Zone (MRZ) shown in this focused crop of the lower part of the passport page. Never guess, repair, reconstruct, or invent characters. Return JSON with exactly mrzLine1 and mrzLine2. Each value must be the complete visible ICAO TD3 line of exactly 44 characters with no spaces. If a complete line cannot be read with confidence, return an empty string for that line. Do not return partial or invented MRZ data.`;
