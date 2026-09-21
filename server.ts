@@ -382,158 +382,61 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
   try {
     const { imageBase64, mimeType = "image/jpeg" } = req.body || {};
     const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+
     if (typeof imageBase64 !== "string" || imageBase64.length < 100) {
       return res.status(400).json({ success: false, error: "Valid passport image is required" });
     }
     if (!allowedMimeTypes.has(mimeType)) {
       return res.status(400).json({ success: false, error: "Unsupported image type" });
     }
-    const rawBase64 = imageBase64.replace(/^data:[^;]+;base64,/, "").replace(/\s/g, "");
+
+    const rawBase64 = imageBase64
+      .replace(/^data:[^;]+;base64,/, "")
+      .replace(/\s/g, "");
+
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(rawBase64) || rawBase64.length % 4 !== 0) {
       return res.status(400).json({ success: false, error: "Invalid image encoding" });
     }
-    // Limit decoded image payload to approximately 8 MiB.
+
     const estimatedBytes = Math.floor((rawBase64.length * 3) / 4);
     if (estimatedBytes > 8 * 1024 * 1024) {
       return res.status(413).json({ success: false, error: "Passport image is too large" });
     }
-    // Fast MRZ strategy:
-    // 1) Let Gemini locate the MRZ first (one small request).
-    // 2) Run strict native OCR only on that localized crop.
-    // 3) If localization fails, use a small deterministic fallback set.
-    // This avoids the previous 60+ Tesseract attempts that could consume the
-    // entire 90-second client timeout before Gemini ever got a chance to run.
-    let nativeVerifiedMrz: { line1: string; line2: string } | null = null;
 
-    // Phase 1: run deterministic local OCR immediately on the original upload.
-    // Do not spend time generating six Sharp crops or calling Gemini before the
-    // cheapest checksum-verifiable path has had a chance to succeed.
-    try {
-      nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr([rawBase64]);
-    } catch (error) {
-      console.warn("Primary native MRZ OCR failed:", error instanceof Error ? error.message : "unknown error");
-    }
-
-    // Phase 2: only build additional crops if the fast native pass missed.
-    // This is important for composite uploads where the passport is only part
-    // of the frame, while keeping the common path very short.
-    let mrzFocusedImages: string[] = [];
-    if (!nativeVerifiedMrz) {
-      mrzFocusedImages = await buildMrzFocusedImages(rawBase64);
+    /*
+     * SIMPLE PASSPORT SCAN:
+     * One Gemini Vision request reads the passport page and extracts the fields.
+     * MRZ is optional. It is useful when visible, but it must never block normal
+     * passport data capture. This removes the previous long OCR -> locator ->
+     * OCR -> Gemini chain that caused the mobile timeout.
+     */
+    if (ai) {
       try {
-        nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr(mrzFocusedImages.slice(0, 2));
-      } catch (error) {
-        console.warn("Focused native MRZ OCR failed:", error instanceof Error ? error.message : "unknown error");
-      }
-    }
+        const prompt = 'You are a passport data extraction service.\\n' +
+          'First decide whether this image clearly shows a passport biodata/photo page.\\n' +
+          'Return JSON only with exactly these keys:\\n' +
+          '{\\n' +
+          '  "passportDetected": true or false,\\n' +
+          '  "confidence": number from 0 to 1,\\n' +
+          '  "visualZone": {\\n' +
+          '    "firstName": "", "lastName": "", "fullName": "", "fullNameArabic": "",\\n' +
+          '    "passportNumber": "", "birthDate": "", "expiryDate": "",\\n' +
+          '    "gender": "", "nationality": "", "jobTitle": ""\\n' +
+          '  },\\n' +
+          '  "mrzLine1": "",\\n' +
+          '  "mrzLine2": ""\\n' +
+          '}\\n' +
+          'Rules:\\n' +
+          '- Read only information actually visible in the image. Never invent or guess.\\n' +
+          '- If this is not a passport biodata page, set passportDetected=false and leave all fields empty.\\n' +
+          '- Extract the passport number, name, date of birth, expiry date, gender and nationality when clearly visible.\\n' +
+          '- Dates may be returned as YYYY-MM-DD, DD/MM/YYYY, or the exact printed date.\\n' +
+          '- jobTitle should be empty unless a profession is explicitly printed on the passport.\\n' +
+          '- mrzLine1 and mrzLine2 are optional. Return them only when each complete TD3 line is clearly visible; otherwise leave them empty.\\n' +
+          '- Do not delay the response for MRZ. The main goal is simply to identify the passport and record its visible data.';
 
-    // Phase 3: Gemini localization is a fallback only. It is never required
-    // before the deterministic checksum-valid MRZ path.
-    if (!nativeVerifiedMrz && ai) {
-      const locatedMrzImage = await locateMrzWithGemini(rawBase64, mimeType);
-      if (locatedMrzImage) {
-        try {
-          nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr([locatedMrzImage]);
-        } catch (error) {
-          console.warn("Located MRZ native OCR failed:", error instanceof Error ? error.message : "unknown error");
-        }
-      }
-    }
-
-    // Fast-path: a checksum-valid native MRZ already contains the structured
-    // passport identity fields required by the client (passport number, DOB,
-    // expiry, sex, nationality, surname and given names). Return it immediately.
-    // This is the authoritative acceptance path and avoids a network/AI timeout.
-    // VIZ extraction is optional and must never delay or weaken MRZ verification.
-    if (nativeVerifiedMrz) {
-      const fastData = normalizePassportScanResult({
-        mrzLine1: nativeVerifiedMrz.line1,
-        mrzLine2: nativeVerifiedMrz.line2
-      });
-      return res.json({
-        success: true,
-        data: fastData,
-        model: "native-mrz-ocr",
-        mrzSource: "native-ocr-verified"
-      });
-    }
-
-    if (!ai) {
-      if (nativeVerifiedMrz) {
-        const fallbackData = normalizePassportScanResult({
-          mrzLine1: nativeVerifiedMrz.line1,
-          mrzLine2: nativeVerifiedMrz.line2
-        });
-        return res.json({
-          success: true,
-          data: fallbackData,
-          model: "native-mrz-ocr",
-          mrzSource: "native-ocr-verified"
-        });
-      }
-      return res.status(503).json({ success: false, error: "Passport scanning service is not configured" });
-    }
-
-    // IMPORTANT: When native OCR has already produced a checksum-valid MRZ, do not
-    // spend additional requests locating/re-reading the MRZ. The MRZ is already verified;
-    // Gemini is used only once to extract VIZ fields. This keeps the production request
-    // comfortably within the client timeout and avoids turning a successful MRZ scan into
-    // a server-timeout failure.
-    if (nativeVerifiedMrz) {
-      const vizOnlyPrompt = `Analyze ONLY the visible/visual (VIZ) fields on this passport image. Do not read, return, repair, synthesize, reconstruct, or guess MRZ characters. Return JSON only with exactly one top-level key visualZone containing only these fields: firstName, lastName, fullName, fullNameArabic, passportNumber, birthDate, expiryDate, gender, nationality, jobTitle. Use only information visibly printed in the passport's visual zone. If a field is not clearly visible, return an empty string.`;
-      try {
-        const result = await ai.models.generateContent({
+        const geminiRequest = ai.models.generateContent({
           model: "gemini-2.5-flash",
-          contents: [{
-            role: "user",
-            parts: [
-              { inlineData: { mimeType, data: rawBase64 } },
-              { text: vizOnlyPrompt }
-            ]
-          }],
-          config: { responseMimeType: "application/json" }
-        });
-        const parsed = JSON.parse(result.text?.trim() || "{}");
-        const merged = normalizePassportScanResult({
-          ...parsed,
-          mrzLine1: nativeVerifiedMrz.line1,
-          mrzLine2: nativeVerifiedMrz.line2
-        });
-        return res.json({
-          success: true,
-          data: merged,
-          model: "gemini-2.5-flash+native-mrz-ocr",
-          mrzSource: "native-ocr-verified"
-        });
-      } catch (error) {
-        console.warn("Gemini VIZ extraction failed after verified native MRZ:", error instanceof Error ? error.message : "unknown error");
-        const fallbackData = normalizePassportScanResult({
-          mrzLine1: nativeVerifiedMrz.line1,
-          mrzLine2: nativeVerifiedMrz.line2
-        });
-        return res.json({
-          success: true,
-          data: fallbackData,
-          model: "native-mrz-ocr",
-          mrzSource: "native-ocr-verified"
-        });
-      }
-    }
-
-    // Native OCR did not find a verified MRZ. Gemini now acts only as the
-    // secondary strict MRZ/VIZ reader; any MRZ it returns still requires ICAO
-    // checksum validation before acceptance.
-    const prompt = `Analyze this passport image for OCR and MRZ data. Never invent, repair, synthesize, reconstruct, or guess any MRZ characters or passport fields. Return JSON only using exactly these top-level keys: mrzLine1, mrzLine2, visualZone. visualZone must contain only visible fields: firstName, lastName, fullName, fullNameArabic, passportNumber, birthDate, expiryDate, gender, nationality, jobTitle. mrzLine1 and mrzLine2 must contain the two COMPLETE visible ICAO TD3 MRZ lines exactly as read, including < filler characters, with no spaces. If either MRZ line cannot be read completely, return that line as an empty string. Do not manufacture missing characters.`;
-    const mrzRetryPrompt = `Read ONLY the Machine Readable Zone (MRZ) shown in this focused crop of the lower part of the passport page. Never guess, repair, reconstruct, or invent characters. Return JSON with exactly mrzLine1 and mrzLine2. Each value must be the complete visible ICAO TD3 line of exactly 44 characters with no spaces. If a complete line cannot be read with confidence, return an empty string for that line. Do not return partial or invented MRZ data.`;
-    // Keep the fallback bounded: one primary model plus one focused retry.
-    // Native OCR remains the primary strict verification path.
-    const models = ["gemini-2.5-flash"];
-    let lastError: unknown = null;
-
-    for (const model of models) {
-      try {
-        const result = await ai.models.generateContent({
-          model,
           contents: [{
             role: "user",
             parts: [
@@ -543,101 +446,104 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
           }],
           config: { responseMimeType: "application/json" }
         });
+
+        const result = await Promise.race([
+          geminiRequest,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Passport AI timeout")), 25000)
+          )
+        ]);
+
         const text = result.text?.trim();
         if (!text) throw new Error("Empty Gemini response");
+
         const parsed = JSON.parse(text);
         const normalized = normalizePassportScanResult(parsed);
+        const visual = normalized.visualZone;
+        const hasVisibleData = Boolean(
+          visual.firstName ||
+          visual.lastName ||
+          visual.fullName ||
+          visual.fullNameArabic ||
+          visual.passportNumber ||
+          visual.birthDate ||
+          visual.expiryDate
+        );
 
-        // Gemini is still used for VIZ and as a secondary MRZ reader, but its MRZ is
-        // accepted only after the same strict ICAO parser/checksum gate.
-        if (nativeVerifiedMrz) {
-          const merged = normalizePassportScanResult({
-            ...parsed,
-            mrzLine1: nativeVerifiedMrz.line1,
-            mrzLine2: nativeVerifiedMrz.line2
-          });
+        if (parsed.passportDetected === true && hasVisibleData) {
           return res.json({
             success: true,
-            data: merged,
-            model: `${model}+native-mrz-ocr`,
-            mrzSource: "native-ocr-verified"
+            data: normalized,
+            passportDetected: true,
+            confidence: Number(parsed.confidence) || 0,
+            model: "gemini-2.5-flash-simple-passport"
           });
         }
 
-        if (normalized.mrzDetected) {
-          const parsedMrz = parseTD3MRZ(normalized.mrzLine1 || "", normalized.mrzLine2 || "");
-          if (parsedMrz?.checksums.allValid) {
-            return res.json({ success: true, data: normalized, model });
-          }
-        }
-
-        const retryImages = mrzFocusedImages.length > 0 ? mrzFocusedImages.slice(0, 1) : [rawBase64];
-        for (let retryIndex = 0; retryIndex < retryImages.length; retryIndex += 1) {
-          const retry = await ai.models.generateContent({
-            model,
-            contents: [{
-              role: "user",
-              parts: [
-                { inlineData: { mimeType: "image/jpeg", data: retryImages[retryIndex] } },
-                { text: mrzRetryPrompt }
-              ]
-            }],
-            config: { responseMimeType: "application/json" }
-          });
-          const retryText = retry.text?.trim();
-          if (!retryText) continue;
-          const retryParsed = JSON.parse(retryText);
-          const retryNormalized = normalizePassportScanResult({
-            ...parsed,
-            mrzLine1: retryParsed?.mrzLine1 ?? retryParsed?.line1,
-            mrzLine2: retryParsed?.mrzLine2 ?? retryParsed?.line2,
-            mrz: retryParsed?.mrz
-          });
-          if (retryNormalized.mrzDetected) {
-            const retryMrz = parseTD3MRZ(retryNormalized.mrzLine1 || "", retryNormalized.mrzLine2 || "");
-            if (retryMrz?.checksums.allValid) {
-              return res.json({ success: true, data: retryNormalized, model });
-            }
-          }
-        }
-
-        if (nativeVerifiedMrz) {
-          const merged = normalizePassportScanResult({
-            ...parsed,
-            mrzLine1: nativeVerifiedMrz.line1,
-            mrzLine2: nativeVerifiedMrz.line2
-          });
-          return res.json({
-            success: true,
-            data: merged,
-            model: `${model}+native-mrz-ocr`,
-            mrzSource: "native-ocr-verified"
+        if (parsed.passportDetected === false) {
+          return res.status(422).json({
+            success: false,
+            passportDetected: false,
+            error: "لم يتم التعرف على صورة جواز سفر واضحة. يرجى رفع صورة صفحة الجواز."
           });
         }
-        return res.json({ success: true, data: normalized, model });
       } catch (error) {
-        lastError = error;
-        console.warn(`Gemini passport scan failed for ${model}:`, error instanceof Error ? error.message : "unknown error");
+        console.warn(
+          "Simple Gemini passport extraction failed; trying local MRZ fallback:",
+          error instanceof Error ? error.message : "unknown error"
+        );
       }
     }
 
-    console.error("All Gemini passport scan models failed:", lastError instanceof Error ? lastError.message : "unknown error");
-    if (nativeVerifiedMrz) {
-      const fallbackData = normalizePassportScanResult({
-        mrzLine1: nativeVerifiedMrz.line1,
-        mrzLine2: nativeVerifiedMrz.line2
-      });
-      return res.json({
-        success: true,
-        data: fallbackData,
-        model: "native-mrz-ocr",
-        mrzSource: "native-ocr-verified"
+    /*
+     * Fallback only: native OCR is now used after Gemini, not before it.
+     * This prevents the expensive OCR pipeline from causing the normal request
+     * to time out.
+     */
+    try {
+      const nativeVerifiedMrz = await extractVerifiedMrzWithNativeOcr([rawBase64]);
+      if (nativeVerifiedMrz) {
+        const data = normalizePassportScanResult({
+          mrzLine1: nativeVerifiedMrz.line1,
+          mrzLine2: nativeVerifiedMrz.line2
+        });
+        return res.json({
+          success: true,
+          data,
+          passportDetected: true,
+          confidence: 1,
+          model: "native-mrz-fallback",
+          mrzSource: "native-ocr-verified"
+        });
+      }
+    } catch (error) {
+      console.warn(
+        "Native MRZ fallback failed:",
+        error instanceof Error ? error.message : "unknown error"
+      );
+    }
+
+    if (!ai) {
+      return res.status(503).json({
+        success: false,
+        error: "Passport scanning service is not configured"
       });
     }
-    return res.status(502).json({ success: false, error: "Passport scanning service failed" });
+
+    return res.status(422).json({
+      success: false,
+      passportDetected: false,
+      error: "لم يتم استخراج بيانات واضحة من الجواز. يرجى تجربة صورة أوضح."
+    });
   } catch (error) {
-    console.error("Passport scan request failed:", error instanceof Error ? error.message : "unknown error");
-    return res.status(500).json({ success: false, error: "Passport scan request failed" });
+    console.error(
+      "Passport scan request failed:",
+      error instanceof Error ? error.message : "unknown error"
+    );
+    return res.status(500).json({
+      success: false,
+      error: "Passport scan request failed"
+    });
   }
 });
 
