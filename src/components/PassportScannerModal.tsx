@@ -134,7 +134,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
         extractedData = (res.data as any).data || res.data;
       } else if (res.error) {
         console.warn("Backend /api/scan-passport error:", res.error);
-        setErrorMessage(\`فشل فحص الجواز من الخادم: \${res.error}\`);
+        setErrorMessage(`فشل فحص الجواز من الخادم: ${res.error}`);
         return;
       }
 
