@@ -299,7 +299,35 @@ async function locateMrzWithGemini(base64: string, mimeType: string): Promise<st
           { text: "Locate ONLY the two-line ICAO TD3 Machine Readable Zone (MRZ) on this passport image. Do not read or return any passport data. Return JSON only: {x,y,width,height,confidence}. Coordinates must be normalized 0..1 relative to the full image and form a tight rectangle around BOTH MRZ lines, including a small margin. If no MRZ is visible, return width:0,height:0,confidence:0. Do not invent a location." }
         ]
       }],
-      config: { responseMimeType: "application/json" }
+      config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                passportDetected: { type: "BOOLEAN" },
+                confidence: { type: "NUMBER" },
+                visualZone: {
+                  type: "OBJECT",
+                  properties: {
+                    firstName: { type: "STRING" },
+                    lastName: { type: "STRING" },
+                    fullName: { type: "STRING" },
+                    fullNameArabic: { type: "STRING" },
+                    passportNumber: { type: "STRING" },
+                    birthDate: { type: "STRING" },
+                    expiryDate: { type: "STRING" },
+                    gender: { type: "STRING" },
+                    nationality: { type: "STRING" },
+                    jobTitle: { type: "STRING" }
+                  },
+                  required: ["firstName","lastName","fullName","fullNameArabic","passportNumber","birthDate","expiryDate","gender","nationality","jobTitle"]
+                },
+                mrzLine1: { type: "STRING" },
+                mrzLine2: { type: "STRING" }
+              },
+              required: ["passportDetected","confidence","visualZone","mrzLine1","mrzLine2"]
+            }
+          }
     });
     const parsed = JSON.parse(result.text?.trim() || "{}");
     const x = Number(parsed.x);
@@ -436,7 +464,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
           '- Do not delay the response for MRZ. The main goal is simply to identify the passport and record its visible data.';
 
         const geminiRequest = ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-2.5-flash-lite",
           contents: [{
             role: "user",
             parts: [
@@ -450,7 +478,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
         const result = await Promise.race([
           geminiRequest,
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("Passport AI timeout")), 25000)
+            setTimeout(() => reject(new Error("Passport AI timeout")), 20000)
           )
         ]);
 
@@ -460,6 +488,27 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
         const parsed = JSON.parse(text);
         const normalized = normalizePassportScanResult(parsed);
         const visual = normalized.visualZone;
+
+        if (normalized.mrzLine1 && normalized.mrzLine2) {
+          try {
+            const mrzParsed = parseTD3MRZ(normalized.mrzLine1, normalized.mrzLine2);
+            if (mrzParsed) {
+              if (!visual.firstName && mrzParsed.givenNames) visual.firstName = mrzParsed.givenNames;
+              if (!visual.lastName && mrzParsed.surname) visual.lastName = mrzParsed.surname;
+              if (!visual.fullName && (mrzParsed.givenNames || mrzParsed.surname)) {
+                visual.fullName = [mrzParsed.givenNames, mrzParsed.surname].filter(Boolean).join(" ");
+              }
+              if (!visual.passportNumber && mrzParsed.passportNumber) visual.passportNumber = mrzParsed.passportNumber;
+              if (!visual.birthDate && mrzParsed.birthDateFormatted) visual.birthDate = mrzParsed.birthDateFormatted;
+              if (!visual.expiryDate && mrzParsed.expiryDateFormatted) visual.expiryDate = mrzParsed.expiryDateFormatted;
+              if (!visual.gender && mrzParsed.gender) visual.gender = mrzParsed.gender;
+              if (!visual.nationality && mrzParsed.nationalityName) visual.nationality = mrzParsed.nationalityName;
+            }
+          } catch {
+            // MRZ remains optional; never fail the visual extraction because of it.
+          }
+        }
+
         const hasVisibleData = Boolean(
           visual.firstName ||
           visual.lastName ||
