@@ -96,8 +96,13 @@ export const parseStrictDate = (value: string): Date | null => {
 };
 
 export function canApprovePassportData(input: PassportApprovalInput): PassportApprovalResult {
-  if (!input.hasVerifiedMrz && !input.allowVisualData) {
-    return { allowed: false, reason: "لا يمكن اعتماد بيانات الجواز قبل التعرف على صفحة الجواز." };
+  // Final approval is a strict trust boundary: visual extraction alone
+  // is never sufficient. The MRZ must be present and ICAO-verified.
+  if (!input.hasVerifiedMrz) {
+    return {
+      allowed: false,
+      reason: "لا يمكن اعتماد بيانات الجواز قبل التحقق من MRZ وأرقام التحقق وفق ICAO 9303."
+    };
   }
 
   const fName = (input.firstName || "").trim();
