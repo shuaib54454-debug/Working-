@@ -406,6 +406,47 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 // or deployment details to unauthenticated callers.
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 
+async function cropPassportPhoto(
+  base64: string,
+  mimeType: string,
+  zone: { x?: unknown; y?: unknown; width?: unknown; height?: unknown; confidence?: unknown } | undefined
+): Promise<string | null> {
+  try {
+    if (!zone) return null;
+    const x = Number(zone.x);
+    const y = Number(zone.y);
+    const width = Number(zone.width);
+    const height = Number(zone.height);
+    const confidence = Number(zone.confidence);
+    if (![x, y, width, height, confidence].every(Number.isFinite)) return null;
+    if (confidence < 0.45 || width <= 0 || height <= 0) return null;
+    if (x < 0 || y < 0 || x + width > 1 || y + height > 1) return null;
+
+    const input = Buffer.from(base64, "base64");
+    const metadata = await sharp(input).metadata();
+    const imageWidth = metadata.width || 0;
+    const imageHeight = metadata.height || 0;
+    if (!imageWidth || !imageHeight) return null;
+
+    const left = Math.max(0, Math.floor(imageWidth * x));
+    const top = Math.max(0, Math.floor(imageHeight * y));
+    const cropWidth = Math.min(imageWidth - left, Math.max(80, Math.floor(imageWidth * width)));
+    const cropHeight = Math.min(imageHeight - top, Math.max(100, Math.floor(imageHeight * height)));
+    if (cropWidth < 80 || cropHeight < 100) return null;
+
+    const output = await sharp(input)
+      .extract({ left, top, width: cropWidth, height: cropHeight })
+      .resize({ width: 600, height: 800, fit: "inside", withoutEnlargement: false })
+      .jpeg({ quality: 88, chromaSubsampling: "4:4:4" })
+      .toBuffer();
+
+    return `data:image/jpeg;base64,${output.toString("base64")}`;
+  } catch (error) {
+    console.warn("Passport photo crop failed:", error instanceof Error ? error.message : "unknown error");
+    return null;
+  }
+}
+
 app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
   try {
     const { imageBase64, mimeType = "image/jpeg" } = req.body || {};
@@ -440,29 +481,32 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
      */
     if (ai) {
       try {
-        const prompt = 'You are a passport data extraction service.\\n' +
-          'First decide whether this image clearly shows a passport biodata/photo page.\\n' +
-          'Return JSON only with exactly these keys:\\n' +
-          '{\\n' +
-          '  "passportDetected": true or false,\\n' +
-          '  "confidence": number from 0 to 1,\\n' +
-          '  "visualZone": {\\n' +
-          '    "firstName": "", "lastName": "", "fullName": "", "fullNameArabic": "",\\n' +
-          '    "passportNumber": "", "birthDate": "", "expiryDate": "",\\n' +
-          '    "gender": "", "nationality": "", "jobTitle": ""\\n' +
-          '  },\\n' +
-          '  "mrzLine1": "",\\n' +
-          '  "mrzLine2": ""\\n' +
-          '}\\n' +
-          'Rules:\\n' +
-          '- Read only information actually visible in the image. Never invent or guess.\\n' +
-          '- If this is not a passport biodata page, set passportDetected=false and leave all fields empty.\\n' +
-          '- Extract the passport number, name, date of birth, expiry date, gender and nationality when clearly visible.\\n' +
-          '- Dates may be returned as YYYY-MM-DD, DD/MM/YYYY, or the exact printed date.\\n' +
-          '- jobTitle should be empty unless a profession is explicitly printed on the passport.\\n' +
-          '- mrzLine1 and mrzLine2 are optional. Return them only when each complete TD3 line is clearly visible; otherwise leave them empty.\\n' +
-          '- Do not delay the response for MRZ. The main goal is simply to identify the passport and record its visible data.';
-
+        const prompt = `You are a passport data extraction service.
+First decide whether the image contains a clear passport biodata/photo page, even if the image is a collage or contains unrelated candidate photos beside the passport.
+Return JSON only with exactly these keys:
+{
+  "passportDetected": true or false,
+  "confidence": number from 0 to 1,
+  "visualZone": {
+    "firstName": "", "lastName": "", "fullName": "", "fullNameArabic": "",
+    "passportNumber": "", "birthDate": "", "expiryDate": "",
+    "gender": "", "nationality": "", "jobTitle": ""
+  },
+  "mrzLine1": "",
+  "mrzLine2": "",
+  "passportPhotoZone": { "x": 0, "y": 0, "width": 0, "height": 0, "confidence": 0 }
+}
+Rules:
+- Read only information actually visible in the passport page. Never invent or guess.
+- Ignore any person photo, full-body photo, logo, or other image outside the passport page.
+- Extract the passport number, name, date of birth, expiry date, gender and nationality when clearly visible.
+- Dates may be returned as YYYY-MM-DD, DD/MM/YYYY, or the exact printed date.
+- jobTitle should be empty unless a profession is explicitly printed on the passport.
+- mrzLine1 and mrzLine2 are optional. Return them only when each complete TD3 line is clearly visible; otherwise leave them empty.
+- passportPhotoZone must be the tight rectangle around the SMALL PORTRAIT PHOTOGRAPH EMBEDDED INSIDE THE PASSPORT BIODATA PAGE, not the person's photo outside the passport.
+- passportPhotoZone coordinates are normalized 0..1 relative to the full uploaded image: x and y are the top-left, width and height are the box size.
+- If the embedded passport portrait cannot be located confidently, return width:0,height:0,confidence:0.
+- Do not delay the response for MRZ or photo cropping. The main goal is to identify the passport and record its visible data.`;
         const geminiRequest = ai.models.generateContent({
           model: "gemini-2.5-flash-lite",
           contents: [{
@@ -488,6 +532,11 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
         const parsed = JSON.parse(text);
         const normalized = normalizePassportScanResult(parsed);
         const visual = normalized.visualZone;
+        const passportPhotoDataUrl = await cropPassportPhoto(
+          rawBase64,
+          mimeType,
+          parsed.passportPhotoZone
+        );
 
         if (normalized.mrzLine1 && normalized.mrzLine2) {
           try {
@@ -525,6 +574,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
             data: normalized,
             passportDetected: true,
             confidence: Number(parsed.confidence) || 0,
+            passportPhotoDataUrl: passportPhotoDataUrl || undefined,
             model: "gemini-2.5-flash-simple-passport"
           });
         }
