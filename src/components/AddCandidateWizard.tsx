@@ -21,6 +21,9 @@ import { getTodayDateString } from "../data/initialData";
 import { PassportScannerModal } from "./PassportScannerModal";
 import { findCandidateDuplicates } from "../lib/candidateDuplicate";
 import { useLanguage } from "../lib/LanguageContext";
+import { uploadWorkerDocument } from "../lib/firebase";
+
+type CandidateDraft = Partial<Candidate> & { __passportPhotoDataUrl?: string };
 
 interface AddCandidateWizardProps {
   isOpen: boolean;
@@ -40,6 +43,7 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [isScannedWithMRZ, setIsScannedWithMRZ] = useState(false);
   const [scanAppliedMessage, setScanAppliedMessage] = useState<string | null>(null);
+  const [passportPhotoDataUrl, setPassportPhotoDataUrl] = useState<string | null>(null);
 
   // Form State
   const [firstName, setFirstName] = useState("");
@@ -80,6 +84,7 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
     gender: "male" | "female";
     country: string;
     job?: string;
+    passportPhotoDataUrl?: string;
   }) => {
     if (data.firstName) setFirstName(data.firstName.trim());
     if (data.lastName) {
@@ -92,6 +97,7 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
     if (data.dateOfBirth) setDateOfBirth(data.dateOfBirth.trim());
     if (data.gender) setGender(data.gender);
     if (data.job) setJob(data.job.trim());
+    if (data.passportPhotoDataUrl) setPassportPhotoDataUrl(data.passportPhotoDataUrl);
     setIsScannedWithMRZ(true);
     setScanAppliedMessage(
       isAr
@@ -106,7 +112,7 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
       return;
     }
 
-    const candidateData: Partial<Candidate> = {
+    const candidateData: CandidateDraft = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       phone: phone.trim(),
@@ -129,7 +135,8 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
       medicalStatus: "لم يفحص",
       trainingStatus: "لم يبدأ",
       visaStatus: "لم تقدم",
-      flightStatus: "لم تحجز بعد"
+      flightStatus: "لم تحجز بعد",
+      __passportPhotoDataUrl: passportPhotoDataUrl || undefined
     };
 
     let initialPayment = undefined;
@@ -175,6 +182,39 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
     }
 
     onAdd(candidateData, initialPayment);
+
+    if (passportPhotoDataUrl) {
+      void (async () => {
+        try {
+          const match = passportPhotoDataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/s);
+          if (!match) throw new Error("Invalid cropped passport photo");
+          const mimeType = match[1] || "image/jpeg";
+          const binary = atob(match[2]);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          const blob = new Blob([bytes], { type: mimeType });
+          const uploaded = await uploadWorkerDocument(
+            nextCandidateId,
+            "photo",
+            blob,
+            `${nextCandidateId}-passport-photo.jpg`
+          );
+          // The parent owns the candidate record; this update is picked up by
+          // the normal candidate synchronization path in App.
+          window.dispatchEvent(new CustomEvent("shuayb:candidate-photo-uploaded", {
+            detail: {
+              candidateId: nextCandidateId,
+              photoUrl: uploaded.downloadUrl,
+              photoStoragePath: uploaded.storagePath,
+              photoDocId: uploaded.docId
+            }
+          }));
+        } catch (error) {
+          console.warn("Automatic passport portrait upload failed:", error);
+        }
+      })();
+    }
+
     onClose();
   };
 
