@@ -260,11 +260,15 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       if (vz.nationality) setVisualNationality(vz.nationality);
       if (vz.jobTitle) setVisualJob(vz.jobTitle);
 
-      // MRZ is optional now. The scanner's job is simply to recognize the
-      // passport page and fill the visible passport data.
-      setMrzLine1("");
-      setMrzLine2("");
-      setStatusMessage("تم التعرف على الجواز وتسجيل البيانات بنجاح.");
+      // Preserve verified MRZ returned by the backend. Never erase it after a
+      // successful scan because the approval guard uses it as the trust anchor.
+      setMrzLine1(line1);
+      setMrzLine2(line2);
+      if (line1 && line2) {
+        setStatusMessage("تم التعرف على الجواز والتحقق من منطقة MRZ بنجاح.");
+      } else {
+        setStatusMessage("تم التعرف على بيانات الجواز، لكن التحقق من MRZ غير مكتمل.");
+      }
       setErrorMessage(null);
     } catch (e: any) {
       console.warn("Passport scanning error:", e);
