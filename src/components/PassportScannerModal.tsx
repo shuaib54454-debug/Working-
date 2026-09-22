@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { X, Camera, Upload, FileCheck, CheckCircle2, AlertTriangle, XCircle, Sparkles, ShieldCheck, RefreshCw, Copy, Check, Calendar, User, Eye, SlidersHorizontal, Info } from "lucide-react";
 import { parseTD3MRZ, analyzeAndCrossCheckPassport, PassportScanAnalysis, SAMPLE_PASSPORTS, VisualZoneData } from "../lib/mrzScanner";
-import { postJsonToApi } from "../lib/apiConfig";
+import { getApiUrl, postJsonToApi } from "../lib/apiConfig";
 import { compressImage } from "../lib/imageUtils";
 import { canApprovePassportData, cleanPassportNumber, normalizeDateToISO } from "../lib/passportApprovalGuard";
 
@@ -44,7 +44,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
     setIsCameraActive(false);
   };
 
-  useEffect(() => { if (!isOpen) stopCamera(); }, [isOpen]);
+  useEffect(() => {\n    if (!isOpen) {\n      stopCamera();\n      return;\n    }\n    // Warm the Render backend in the background so the first passport scan is\n    // not spent waiting for a sleeping free-tier instance to wake up.\n    const controller = new AbortController();\n    const timer = window.setTimeout(() => controller.abort(), 25000);\n    void fetch(getApiUrl("/api/health"), {\n      method: "GET",\n      cache: "no-store",\n      signal: controller.signal\n    }).catch(() => undefined).finally(() => window.clearTimeout(timer));\n    return () => {\n      controller.abort();\n      window.clearTimeout(timer);\n    };\n  }, [isOpen]);
   useEffect(() => { if (activeMode !== "CAMERA") stopCamera(); }, [activeMode]);
 
   const resetScanState = () => {
@@ -180,7 +180,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       }>("/api/scan-passport", {
         imageBase64: optimizedImage,
         mimeType: "image/jpeg"
-      }, 30000);
+      }, 90000);
 
       if (requestId !== scanRequestIdRef.current) return;
 
