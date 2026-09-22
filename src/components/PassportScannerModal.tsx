@@ -8,7 +8,7 @@ import { canApprovePassportData, cleanPassportNumber, normalizeDateToISO } from 
 interface PassportScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onApplyData: (data: { firstName: string; lastName: string; passportNumber: string; passportExpiryDate: string; dateOfBirth: string; gender: "male" | "female"; country: string; job?: string }) => void;
+  onApplyData: (data: { firstName: string; lastName: string; passportNumber: string; passportExpiryDate: string; dateOfBirth: string; gender: "male" | "female"; country: string; job?: string; passportPhotoDataUrl?: string }) => void;
 }
 
 export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOpen, onClose, onApplyData }) => {
@@ -33,6 +33,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
   const [visualGender, setVisualGender] = useState<"male" | "female">("male");
   const [visualNationality, setVisualNationality] = useState("المملكة العربية السعودية");
   const [visualJob, setVisualJob] = useState("عامل / عاملة");
+  const [passportPhotoDataUrl, setPassportPhotoDataUrl] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<PassportScanAnalysis | null>(null);
   const scanRequestIdRef = useRef(0);
 
@@ -78,6 +79,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
     setVisualGender("male");
     setVisualNationality("المملكة العربية السعودية");
     setVisualJob("عامل / عاملة");
+    setPassportPhotoDataUrl(null);
     setAnalysis(null);
     setStatusMessage(null);
     setErrorMessage(null);
@@ -178,6 +180,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
         success: boolean;
         passportDetected?: boolean;
         confidence?: number;
+        passportPhotoDataUrl?: string;
         data?: {
           mrzLine1?: string;
           mrzLine2?: string;
@@ -212,6 +215,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       // transport envelope with the passport extraction object.
       const extractedData = ((res.data as any)?.data ?? {}) as {
         mrzLine1?: string;
+        passportPhotoDataUrl?: string;
         mrzLine2?: string;
         visualZone?: {
           firstName?: string;
@@ -229,6 +233,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       const vz = extractedData.visualZone || {};
       const line1 = extractedData.mrzLine1 || "";
       const line2 = extractedData.mrzLine2 || "";
+      if (extractedData.passportPhotoDataUrl) setPassportPhotoDataUrl(extractedData.passportPhotoDataUrl);
 
       let fName = vz.firstName || "";
       let lName = vz.lastName || "";
@@ -329,7 +334,8 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       dateOfBirth: approval.normalizedData.birthDate,
       gender: gndr,
       country: cntry,
-      job: visualJob || "عاملة منزلية"
+      job: visualJob || "عاملة منزلية",
+      passportPhotoDataUrl: passportPhotoDataUrl || undefined
     });
     onClose();
   };
