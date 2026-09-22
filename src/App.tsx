@@ -84,6 +84,7 @@ export default function App() {
   // Authentication must be resolved by Firebase before any private data is rendered.
   const [currentUser, setCurrentUser] = useState<User | AppUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const candidatesRef = useRef<Candidate[]>([]);
   const migrationTriggeredRef = useRef(false);
 
   // 1. Persistent State
@@ -453,6 +454,7 @@ export default function App() {
     }
 
     const uid = currentUser?.uid || "";
+    const passportPhotoDataUrl = (data as Partial<Candidate> & { __passportPhotoDataUrl?: string }).__passportPhotoDataUrl;
     const newCandidate: Candidate = {
       id,
       ownerUid: uid,
@@ -721,6 +723,37 @@ export default function App() {
       alert("تعذر إتمام الحذف السحابي بالكامل. لم يتم حذف السجل من الواجهة؛ يرجى المحاولة مرة أخرى.");
     }
   };
+
+  useEffect(() => {
+    const onPhotoUploaded = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        candidateId?: string;
+        photoUrl?: string;
+        photoStoragePath?: string;
+        photoDocId?: string;
+      }>).detail;
+      if (!detail?.candidateId || !detail.photoUrl) return;
+      const current = candidatesRef.current.find(candidate => candidate.id === detail.candidateId);
+      if (!current) return;
+
+      const updated: Candidate = {
+        ...current,
+        photoUrl: detail.photoUrl,
+        photoStoragePath: detail.photoStoragePath || current.photoStoragePath,
+        photoDocId: detail.photoDocId || current.photoDocId,
+        updatedAt: new Date().toISOString()
+      };
+      setCandidates(prev => prev.map(candidate => candidate.id === updated.id ? updated : candidate));
+      if (currentUser?.uid) {
+        syncCandidateToCloud(updated, currentUser.uid).catch(error =>
+          console.warn("Passport portrait candidate sync failed:", error)
+        );
+      }
+    };
+
+    window.addEventListener("shuayb:candidate-photo-uploaded", onPhotoUploaded);
+    return () => window.removeEventListener("shuayb:candidate-photo-uploaded", onPhotoUploaded);
+  }, [currentUser?.uid]);
 
   const handleBulkArchiveCandidates = async (ids: string[]) => {
     if (!ids || ids.length === 0) return;
