@@ -70,7 +70,8 @@ import {
   syncSettingsToCloud,
   subscribeToActivities,
   syncActivityToCloud,
-  autoMigrateExistingDataToOwner
+  autoMigrateExistingDataToOwner,
+  uploadWorkerDocument
 } from "./lib/firebase";
 import { createActivityEntry, buildHistoricActivitiesFromData } from "./lib/activityLog";
 import { findCandidateDuplicates } from "./lib/candidateDuplicate";
@@ -84,7 +85,6 @@ export default function App() {
   // Authentication must be resolved by Firebase before any private data is rendered.
   const [currentUser, setCurrentUser] = useState<User | AppUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const candidatesRef = useRef<Candidate[]>([]);
   const migrationTriggeredRef = useRef(false);
 
   // 1. Persistent State
@@ -485,6 +485,36 @@ export default function App() {
 
     setCandidates(prev => [newCandidate, ...prev]);
     if (uid) syncCandidateToCloud(newCandidate, uid).catch(err => console.error("Cloud candidate sync error:", err));
+    if (passportPhotoDataUrl) {
+      void (async () => {
+        try {
+          const match = passportPhotoDataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/s);
+          if (!match) throw new Error("Invalid cropped passport photo");
+          const mimeType = match[1] || "image/jpeg";
+          const binary = atob(match[2]);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          const blob = new Blob([bytes], { type: mimeType });
+          const uploaded = await uploadWorkerDocument(
+            newCandidate.id,
+            "photo",
+            blob,
+            `${newCandidate.id}-passport-photo.jpg`
+          );
+          const updated: Candidate = {
+            ...newCandidate,
+            photoUrl: uploaded.downloadUrl,
+            photoStoragePath: uploaded.storagePath,
+            photoDocId: uploaded.docId,
+            updatedAt: new Date().toISOString()
+          };
+          setCandidates(prev => prev.map(candidate => candidate.id === updated.id ? updated : candidate));
+          if (uid) await syncCandidateToCloud(updated, uid);
+        } catch (error) {
+          console.warn("Automatic passport portrait upload failed:", error);
+        }
+      })();
+    }
     setSettings(prev => {
       const updated = { ...prev, nextId: prev.nextId + 1, ownerUid: uid };
       if (uid) syncSettingsToCloud(updated, uid).catch(err => console.error("Cloud settings sync error:", err));
@@ -723,37 +753,6 @@ export default function App() {
       alert("تعذر إتمام الحذف السحابي بالكامل. لم يتم حذف السجل من الواجهة؛ يرجى المحاولة مرة أخرى.");
     }
   };
-
-  useEffect(() => {
-    const onPhotoUploaded = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        candidateId?: string;
-        photoUrl?: string;
-        photoStoragePath?: string;
-        photoDocId?: string;
-      }>).detail;
-      if (!detail?.candidateId || !detail.photoUrl) return;
-      const current = candidatesRef.current.find(candidate => candidate.id === detail.candidateId);
-      if (!current) return;
-
-      const updated: Candidate = {
-        ...current,
-        photoUrl: detail.photoUrl,
-        photoStoragePath: detail.photoStoragePath || current.photoStoragePath,
-        photoDocId: detail.photoDocId || current.photoDocId,
-        updatedAt: new Date().toISOString()
-      };
-      setCandidates(prev => prev.map(candidate => candidate.id === updated.id ? updated : candidate));
-      if (currentUser?.uid) {
-        syncCandidateToCloud(updated, currentUser.uid).catch(error =>
-          console.warn("Passport portrait candidate sync failed:", error)
-        );
-      }
-    };
-
-    window.addEventListener("shuayb:candidate-photo-uploaded", onPhotoUploaded);
-    return () => window.removeEventListener("shuayb:candidate-photo-uploaded", onPhotoUploaded);
-  }, [currentUser?.uid]);
 
   const handleBulkArchiveCandidates = async (ids: string[]) => {
     if (!ids || ids.length === 0) return;
@@ -1298,8 +1297,9 @@ export default function App() {
             dateOfBirth: data.dateOfBirth,
             gender: data.gender,
             country: data.country,
-            job: data.job || "عاملة منزلية"
-          });
+            job: data.job || "عاملة منزلية",
+            __passportPhotoDataUrl: data.passportPhotoDataUrl
+          } as Partial<Candidate> & { __passportPhotoDataUrl?: string });
           setShowPassportScanner(false);
         }}
       />
