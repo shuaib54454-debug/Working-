@@ -44,7 +44,25 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
     setIsCameraActive(false);
   };
 
-  useEffect(() => {\n    if (!isOpen) {\n      stopCamera();\n      return;\n    }\n    // Warm the Render backend in the background so the first passport scan is\n    // not spent waiting for a sleeping free-tier instance to wake up.\n    const controller = new AbortController();\n    const timer = window.setTimeout(() => controller.abort(), 25000);\n    void fetch(getApiUrl("/api/health"), {\n      method: "GET",\n      cache: "no-store",\n      signal: controller.signal\n    }).catch(() => undefined).finally(() => window.clearTimeout(timer));\n    return () => {\n      controller.abort();\n      window.clearTimeout(timer);\n    };\n  }, [isOpen]);
+  useEffect(() => {
+    if (!isOpen) {
+      stopCamera();
+      return;
+    }
+    // Warm the Render backend in the background so the first passport scan is
+    // not spent waiting for a sleeping free-tier instance to wake up.
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 25000);
+    void fetch(getApiUrl("/api/health"), {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal
+    }).catch(() => undefined).finally(() => window.clearTimeout(timer));
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [isOpen]);
   useEffect(() => { if (activeMode !== "CAMERA") stopCamera(); }, [activeMode]);
 
   const resetScanState = () => {
