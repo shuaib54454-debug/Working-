@@ -21,7 +21,6 @@ import { getTodayDateString } from "../data/initialData";
 import { PassportScannerModal } from "./PassportScannerModal";
 import { findCandidateDuplicates } from "../lib/candidateDuplicate";
 import { useLanguage } from "../lib/LanguageContext";
-import { uploadWorkerDocument } from "../lib/firebase";
 
 type CandidateDraft = Partial<Candidate> & { __passportPhotoDataUrl?: string };
 
@@ -183,37 +182,7 @@ export const AddCandidateWizard: React.FC<AddCandidateWizardProps> = ({
 
     onAdd(candidateData, initialPayment);
 
-    if (passportPhotoDataUrl) {
-      void (async () => {
-        try {
-          const match = passportPhotoDataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/s);
-          if (!match) throw new Error("Invalid cropped passport photo");
-          const mimeType = match[1] || "image/jpeg";
-          const binary = atob(match[2]);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          const blob = new Blob([bytes], { type: mimeType });
-          const uploaded = await uploadWorkerDocument(
-            nextCandidateId,
-            "photo",
-            blob,
-            `${nextCandidateId}-passport-photo.jpg`
-          );
-          // The parent owns the candidate record; this update is picked up by
-          // the normal candidate synchronization path in App.
-          window.dispatchEvent(new CustomEvent("shuayb:candidate-photo-uploaded", {
-            detail: {
-              candidateId: nextCandidateId,
-              photoUrl: uploaded.downloadUrl,
-              photoStoragePath: uploaded.storagePath,
-              photoDocId: uploaded.docId
-            }
-          }));
-        } catch (error) {
-          console.warn("Automatic passport portrait upload failed:", error);
-        }
-      })();
-    }
+
 
     onClose();
   };
