@@ -478,7 +478,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
         const result = await Promise.race([
           geminiRequest,
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("Passport AI timeout")), 20000)
+            setTimeout(() => reject(new Error("Passport AI timeout")), 60000)
           )
         ]);
 
