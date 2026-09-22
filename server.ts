@@ -304,28 +304,13 @@ async function locateMrzWithGemini(base64: string, mimeType: string): Promise<st
             responseSchema: {
               type: "OBJECT",
               properties: {
-                passportDetected: { type: "BOOLEAN" },
-                confidence: { type: "NUMBER" },
-                visualZone: {
-                  type: "OBJECT",
-                  properties: {
-                    firstName: { type: "STRING" },
-                    lastName: { type: "STRING" },
-                    fullName: { type: "STRING" },
-                    fullNameArabic: { type: "STRING" },
-                    passportNumber: { type: "STRING" },
-                    birthDate: { type: "STRING" },
-                    expiryDate: { type: "STRING" },
-                    gender: { type: "STRING" },
-                    nationality: { type: "STRING" },
-                    jobTitle: { type: "STRING" }
-                  },
-                  required: ["firstName","lastName","fullName","fullNameArabic","passportNumber","birthDate","expiryDate","gender","nationality","jobTitle"]
-                },
-                mrzLine1: { type: "STRING" },
-                mrzLine2: { type: "STRING" }
+                x: { type: "NUMBER" },
+                y: { type: "NUMBER" },
+                width: { type: "NUMBER" },
+                height: { type: "NUMBER" },
+                confidence: { type: "NUMBER" }
               },
-              required: ["passportDetected","confidence","visualZone","mrzLine1","mrzLine2"]
+              required: ["x","y","width","height","confidence"]
             }
           }
     });
