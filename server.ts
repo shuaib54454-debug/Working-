@@ -503,9 +503,10 @@ Rules:
 - Dates may be returned as YYYY-MM-DD, DD/MM/YYYY, or the exact printed date.
 - jobTitle should be empty unless a profession is explicitly printed on the passport.
 - mrzLine1 and mrzLine2 are optional. Return them only when each complete TD3 line is clearly visible; otherwise leave them empty.
-- passportPhotoZone must be the tight rectangle around the SMALL PORTRAIT PHOTOGRAPH EMBEDDED INSIDE THE PASSPORT BIODATA PAGE, not the person's photo outside the passport.
+- passportPhotoZone must be the rectangle around the CANDIDATE'S PHOTO OUTSIDE THE PASSPORT PAGE (for example the studio portrait/full-body portrait shown beside the passport in a combined image). Do NOT crop the small portrait embedded inside the passport.
+- The candidate photo may be a portrait or a full-body studio photo. Select the clearest photo of the same candidate that is outside the passport.
 - passportPhotoZone coordinates are normalized 0..1 relative to the full uploaded image: x and y are the top-left, width and height are the box size.
-- If the embedded passport portrait cannot be located confidently, return width:0,height:0,confidence:0.
+- If no candidate photo outside the passport is present, return width:0,height:0,confidence:0.
 - Do not delay the response for MRZ or photo cropping. The main goal is to identify the passport and record its visible data.`;
         const geminiRequest = ai.models.generateContent({
           model: "gemini-2.5-flash-lite",
