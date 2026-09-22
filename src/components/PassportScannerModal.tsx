@@ -130,7 +130,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       setIsProcessing(true);
       setStatusMessage("جاري تحضير وضغط الصورة...");
       setErrorMessage(null);
-      const compressedDataUrl = await compressImage(file, { maxWidth: 2200, maxHeight: 2200, quality: 0.92 });
+      const compressedDataUrl = await compressImage(file, { maxWidth: 1600, maxHeight: 1600, quality: 0.84 });
       setSelectedImage(compressedDataUrl);
       await processImageWithAI(compressedDataUrl);
     } catch (err: any) {
@@ -150,9 +150,9 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       // Send one optimized image. The server now uses one direct Gemini Vision
       // request and treats MRZ as optional instead of making it a prerequisite.
       const optimizedImage = await compressImage(imageDataUrl, {
-        maxWidth: 2200,
-        maxHeight: 2200,
-        quality: 0.92
+        maxWidth: 1600,
+        maxHeight: 1600,
+        quality: 0.84
       });
       if (requestId !== scanRequestIdRef.current) return;
 
@@ -180,7 +180,7 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       }>("/api/scan-passport", {
         imageBase64: optimizedImage,
         mimeType: "image/jpeg"
-      }, 35000);
+      }, 30000);
 
       if (requestId !== scanRequestIdRef.current) return;
 
