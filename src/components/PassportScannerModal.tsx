@@ -215,7 +215,6 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       // transport envelope with the passport extraction object.
       const extractedData = ((res.data as any)?.data ?? {}) as {
         mrzLine1?: string;
-        passportPhotoDataUrl?: string;
         mrzLine2?: string;
         visualZone?: {
           firstName?: string;
@@ -233,7 +232,8 @@ export const PassportScannerModal: React.FC<PassportScannerModalProps> = ({ isOp
       const vz = extractedData.visualZone || {};
       const line1 = extractedData.mrzLine1 || "";
       const line2 = extractedData.mrzLine2 || "";
-      if (extractedData.passportPhotoDataUrl) setPassportPhotoDataUrl(extractedData.passportPhotoDataUrl);
+      const croppedPhoto = (res.data as any)?.passportPhotoDataUrl as string | undefined;
+      if (croppedPhoto) setPassportPhotoDataUrl(croppedPhoto);
 
       let fName = vz.firstName || "";
       let lName = vz.lastName || "";
