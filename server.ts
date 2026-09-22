@@ -621,7 +621,30 @@ Rules:
               { text: prompt }
             ]
           }],
-          config: { responseMimeType: "application/json" }
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                passportDetected: { type: "BOOLEAN" },
+                confidence: { type: "NUMBER" },
+                visualZone: {
+                  type: "OBJECT",
+                  properties: {
+                    firstName: { type: "STRING" }, lastName: { type: "STRING" },
+                    fullName: { type: "STRING" }, fullNameArabic: { type: "STRING" },
+                    passportNumber: { type: "STRING" }, birthDate: { type: "STRING" },
+                    expiryDate: { type: "STRING" }, gender: { type: "STRING" },
+                    nationality: { type: "STRING" }, jobTitle: { type: "STRING" }
+                  },
+                  required: ["firstName","lastName","fullName","fullNameArabic","passportNumber","birthDate","expiryDate","gender","nationality","jobTitle"]
+                },
+                mrzLine1: { type: "STRING" },
+                mrzLine2: { type: "STRING" }
+              },
+              required: ["passportDetected","confidence","visualZone","mrzLine1","mrzLine2"]
+            }
+          }
         }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("Passport Vision fallback timeout")), 30000)
