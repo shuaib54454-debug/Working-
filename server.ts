@@ -447,6 +447,65 @@ async function cropPassportPhoto(
   }
 }
 
+async function locateCandidatePhotoWithGemini(
+  base64: string,
+  mimeType: string
+): Promise<{ x: number; y: number; width: number; height: number; confidence: number } | null> {
+  if (!ai) return null;
+  try {
+    const result = await Promise.race([
+      ai.models.generateContent({
+        model: "gemini-2.5-flash-lite",
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { mimeType, data: base64 } },
+            { text: `Find the candidate's PERSONAL PHOTO that is OUTSIDE the passport page in this image.
+The upload may be a composite: a passport biodata page on one side and a studio portrait or full-body candidate photo on the other side.
+Return JSON only:
+{"x":0,"y":0,"width":0,"height":0,"confidence":0}
+Coordinates are normalized 0..1 relative to the FULL uploaded image.
+Select the clearest complete candidate photo outside the passport. Include the whole portrait/full-body photo, not the passport's tiny embedded portrait.
+If no separate candidate photo exists, return zeros.
+Do not read passport text and do not invent a location.` }
+          ]
+        }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              x: { type: "NUMBER" },
+              y: { type: "NUMBER" },
+              width: { type: "NUMBER" },
+              height: { type: "NUMBER" },
+              confidence: { type: "NUMBER" }
+            },
+            required: ["x","y","width","height","confidence"]
+          }
+        }
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Candidate photo locator timeout")), 15000)
+      )
+    ]);
+
+    const parsed = JSON.parse(result.text?.trim() || "{}");
+    const x = Number(parsed.x);
+    const y = Number(parsed.y);
+    const width = Number(parsed.width);
+    const height = Number(parsed.height);
+    const confidence = Number(parsed.confidence);
+    if (![x, y, width, height, confidence].every(Number.isFinite)) return null;
+    if (confidence < 0.45 || width <= 0 || height <= 0) return null;
+    if (x < 0 || y < 0 || x + width > 1 || y + height > 1) return null;
+    return { x, y, width, height, confidence };
+  } catch (error) {
+    console.warn("Candidate photo localization skipped:", error instanceof Error ? error.message : "unknown error");
+    return null;
+  }
+}
+
 app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
   try {
     const { imageBase64, mimeType = "image/jpeg" } = req.body || {};
@@ -472,43 +531,88 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
       return res.status(413).json({ success: false, error: "Passport image is too large" });
     }
 
+    if (!ai) {
+      return res.status(503).json({
+        success: false,
+        error: "Passport scanning service is not configured"
+      });
+    }
+
     /*
-     * SIMPLE PASSPORT SCAN:
-     * One Gemini Vision request reads the passport page and extracts the fields.
-     * MRZ is optional. It is useful when visible, but it must never block normal
-     * passport data capture. This removes the previous long OCR -> locator ->
-     * OCR -> Gemini chain that caused the mobile timeout.
+     * Reliable scan architecture:
+     * 1) Native Tesseract reads and verifies the ICAO TD3 MRZ with check digits.
+     *    This is deterministic and does not depend on Gemini understanding the
+     *    whole composite image.
+     * 2) Gemini is used only to locate the separate candidate photo. Photo
+     *    extraction is optional and never blocks passport data.
+     * 3) If no valid MRZ is found, one Gemini Vision fallback reads the biodata page.
      */
-    if (ai) {
-      try {
-        const prompt = `You are a passport data extraction service.
-First decide whether the image contains a clear passport biodata/photo page, even if the image is a collage or contains unrelated candidate photos beside the passport.
+    const [verifiedMrz, photoZone] = await Promise.all([
+      extractVerifiedMrzWithNativeOcr([rawBase64]),
+      locateCandidatePhotoWithGemini(rawBase64, mimeType)
+    ]);
+
+    let passportPhotoDataUrl: string | null = null;
+    if (photoZone) {
+      passportPhotoDataUrl = await cropPassportPhoto(rawBase64, mimeType, photoZone);
+    }
+
+    if (verifiedMrz) {
+      const parsedMrz = parseTD3MRZ(verifiedMrz.line1, verifiedMrz.line2);
+      if (parsedMrz) {
+        const visual = {
+          firstName: parsedMrz.givenNames || "",
+          lastName: parsedMrz.surname || "",
+          fullName: [parsedMrz.givenNames, parsedMrz.surname].filter(Boolean).join(" "),
+          fullNameArabic: "",
+          passportNumber: parsedMrz.passportNumber || "",
+          birthDate: parsedMrz.birthDateFormatted || "",
+          expiryDate: parsedMrz.expiryDateFormatted || "",
+          gender: parsedMrz.gender || "",
+          nationality: parsedMrz.nationalityName || parsedMrz.nationality || "",
+          jobTitle: ""
+        };
+
+        return res.json({
+          success: true,
+          data: {
+            mrzLine1: verifiedMrz.line1,
+            mrzLine2: verifiedMrz.line2,
+            visualZone: visual,
+            mrzDetected: true
+          },
+          passportDetected: true,
+          confidence: 0.99,
+          passportPhotoDataUrl: passportPhotoDataUrl || undefined,
+          model: "native-mrz-tesseract"
+        });
+      }
+    }
+
+    // MRZ is not available: use exactly one Vision request as the fallback.
+    const prompt = `You are a passport data extraction service.
+Read ONLY the passport biodata page. The image may be a composite containing a passport and a separate candidate photo.
 Return JSON only with exactly these keys:
 {
-  "passportDetected": true or false,
-  "confidence": number from 0 to 1,
+  "passportDetected": true,
+  "confidence": 0,
   "visualZone": {
     "firstName": "", "lastName": "", "fullName": "", "fullNameArabic": "",
     "passportNumber": "", "birthDate": "", "expiryDate": "",
     "gender": "", "nationality": "", "jobTitle": ""
   },
-  "mrzLine1": "",
-  "mrzLine2": "",
-  "passportPhotoZone": { "x": 0, "y": 0, "width": 0, "height": 0, "confidence": 0 }
+  "mrzLine1": "", "mrzLine2": ""
 }
 Rules:
-- Read only information actually visible in the passport page. Never invent or guess.
-- Ignore any person photo, full-body photo, logo, or other image outside the passport page.
-- Extract the passport number, name, date of birth, expiry date, gender and nationality when clearly visible.
-- Dates may be returned as YYYY-MM-DD, DD/MM/YYYY, or the exact printed date.
-- jobTitle should be empty unless a profession is explicitly printed on the passport.
-- mrzLine1 and mrzLine2 are optional. Return them only when each complete TD3 line is clearly visible; otherwise leave them empty.
-- passportPhotoZone must be the rectangle around the CANDIDATE'S PHOTO OUTSIDE THE PASSPORT PAGE (for example the studio portrait/full-body portrait shown beside the passport in a combined image). Do NOT crop the small portrait embedded inside the passport.
-- The candidate photo may be a portrait or a full-body studio photo. Select the clearest photo of the same candidate that is outside the passport.
-- passportPhotoZone coordinates are normalized 0..1 relative to the full uploaded image: x and y are the top-left, width and height are the box size.
-- If no candidate photo outside the passport is present, return width:0,height:0,confidence:0.
-- Do not delay the response for MRZ or photo cropping. The main goal is to identify the passport and record its visible data.`;
-        const geminiRequest = ai.models.generateContent({
+- Never invent or guess text.
+- Ignore the separate candidate photo when extracting passport fields.
+- Extract clearly visible passport number, name, date of birth, expiry date, gender and nationality.
+- Return MRZ lines only when complete and clearly readable.
+- The main goal is passport data capture; do not fail because the MRZ is unreadable.`;
+
+    try {
+      const result = await Promise.race([
+        ai.models.generateContent({
           model: "gemini-2.5-flash-lite",
           contents: [{
             role: "user",
@@ -518,103 +622,60 @@ Rules:
             ]
           }],
           config: { responseMimeType: "application/json" }
-        });
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Passport Vision fallback timeout")), 30000)
+        )
+      ]);
 
-        const result = await Promise.race([
-          geminiRequest,
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("Passport AI timeout")), 60000)
-          )
-        ]);
+      const parsed = JSON.parse(result.text?.trim() || "{}");
+      const normalized = normalizePassportScanResult(parsed);
+      const visual = normalized.visualZone;
 
-        const text = result.text?.trim();
-        if (!text) throw new Error("Empty Gemini response");
-
-        const parsed = JSON.parse(text);
-        const normalized = normalizePassportScanResult(parsed);
-        const visual = normalized.visualZone;
-        const passportPhotoDataUrl = await cropPassportPhoto(
-          rawBase64,
-          mimeType,
-          parsed.passportPhotoZone
-        );
-
-        if (normalized.mrzLine1 && normalized.mrzLine2) {
-          try {
-            const mrzParsed = parseTD3MRZ(normalized.mrzLine1, normalized.mrzLine2);
-            if (mrzParsed) {
-              if (!visual.firstName && mrzParsed.givenNames) visual.firstName = mrzParsed.givenNames;
-              if (!visual.lastName && mrzParsed.surname) visual.lastName = mrzParsed.surname;
-              if (!visual.fullName && (mrzParsed.givenNames || mrzParsed.surname)) {
-                visual.fullName = [mrzParsed.givenNames, mrzParsed.surname].filter(Boolean).join(" ");
-              }
-              if (!visual.passportNumber && mrzParsed.passportNumber) visual.passportNumber = mrzParsed.passportNumber;
-              if (!visual.birthDate && mrzParsed.birthDateFormatted) visual.birthDate = mrzParsed.birthDateFormatted;
-              if (!visual.expiryDate && mrzParsed.expiryDateFormatted) visual.expiryDate = mrzParsed.expiryDateFormatted;
-              if (!visual.gender && mrzParsed.gender) visual.gender = mrzParsed.gender;
-              if (!visual.nationality && mrzParsed.nationalityName) visual.nationality = mrzParsed.nationalityName;
-            }
-          } catch {
-            // MRZ remains optional; never fail the visual extraction because of it.
+      if (normalized.mrzLine1 && normalized.mrzLine2) {
+        try {
+          const mrzParsed = parseTD3MRZ(normalized.mrzLine1, normalized.mrzLine2);
+          if (mrzParsed) {
+            if (!visual.firstName) visual.firstName = mrzParsed.givenNames || "";
+            if (!visual.lastName) visual.lastName = mrzParsed.surname || "";
+            if (!visual.fullName) visual.fullName = [mrzParsed.givenNames, mrzParsed.surname].filter(Boolean).join(" ");
+            if (!visual.passportNumber) visual.passportNumber = mrzParsed.passportNumber || "";
+            if (!visual.birthDate) visual.birthDate = mrzParsed.birthDateFormatted || "";
+            if (!visual.expiryDate) visual.expiryDate = mrzParsed.expiryDateFormatted || "";
+            if (!visual.gender) visual.gender = mrzParsed.gender || "";
+            if (!visual.nationality) visual.nationality = mrzParsed.nationalityName || "";
           }
+        } catch {
+          // Optional enrichment only.
         }
-
-        const hasVisibleData = Boolean(
-          visual.firstName ||
-          visual.lastName ||
-          visual.fullName ||
-          visual.fullNameArabic ||
-          visual.passportNumber ||
-          visual.birthDate ||
-          visual.expiryDate
-        );
-
-        if (parsed.passportDetected === true && hasVisibleData) {
-          return res.json({
-            success: true,
-            data: normalized,
-            passportDetected: true,
-            confidence: Number(parsed.confidence) || 0,
-            passportPhotoDataUrl: passportPhotoDataUrl || undefined,
-            model: "gemini-2.5-flash-simple-passport"
-          });
-        }
-
-        if (parsed.passportDetected === false) {
-          return res.status(422).json({
-            success: false,
-            passportDetected: false,
-            error: "لم يتم التعرف على صورة جواز سفر واضحة. يرجى رفع صورة صفحة الجواز."
-          });
-        }
-      } catch (error) {
-        console.warn(
-          "Simple Gemini passport extraction failed; trying local MRZ fallback:",
-          error instanceof Error ? error.message : "unknown error"
-        );
       }
-    }
 
-    // Keep the request deliberately simple: one Vision extraction only.
-    // Do not start a second OCR/MRZ pipeline after a Gemini timeout; that
-    // secondary work was the main cause of the browser-side timeout.
-    if (!ai) {
-      return res.status(503).json({
-        success: false,
-        error: "Passport scanning service is not configured"
-      });
+      const hasCoreData = Boolean(
+        visual.firstName || visual.lastName || visual.fullName ||
+        visual.passportNumber || visual.birthDate || visual.expiryDate
+      );
+
+      if (parsed.passportDetected !== false && hasCoreData) {
+        return res.json({
+          success: true,
+          data: normalized,
+          passportDetected: true,
+          confidence: Number(parsed.confidence) || 0,
+          passportPhotoDataUrl: passportPhotoDataUrl || undefined,
+          model: "gemini-2.5-flash-lite-fallback"
+        });
+      }
+    } catch (error) {
+      console.warn("Passport Vision fallback failed:", error instanceof Error ? error.message : "unknown error");
     }
 
     return res.status(422).json({
       success: false,
       passportDetected: false,
-      error: "لم يتم استخراج بيانات واضحة من الجواز. يرجى تجربة صورة أوضح."
+      error: "لم يتم استخراج بيانات واضحة من الجواز. تأكد من ظهور صفحة البيانات كاملة وبوضوح."
     });
   } catch (error) {
-    console.error(
-      "Passport scan request failed:",
-      error instanceof Error ? error.message : "unknown error"
-    );
+    console.error("Passport scan request failed:", error instanceof Error ? error.message : "unknown error");
     return res.status(500).json({
       success: false,
       error: "Passport scan request failed"
