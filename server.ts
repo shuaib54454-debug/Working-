@@ -569,7 +569,7 @@ app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
           birthDate: parsedMrz.birthDateFormatted || "",
           expiryDate: parsedMrz.expiryDateFormatted || "",
           gender: parsedMrz.gender || "",
-          nationality: parsedMrz.nationalityName || parsedMrz.nationality || "",
+          nationality: parsedMrz.nationalityName || "",
           jobTitle: ""
         };
 
