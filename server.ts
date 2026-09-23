@@ -98,7 +98,14 @@ async function verifyPassportScanAuth(req, res, next) {
 const geminiKey = process.env.GEMINI_API_KEY;
 const ai = geminiKey ? new GoogleGenAI({ apiKey: geminiKey }) : null;
 const configuredOrigins = String(process.env.ALLOWED_ORIGINS || "").split(",").map((o) => o.trim()).filter(Boolean);
-const allowedOrigins = new Set([...configuredOrigins, "capacitor://localhost", "http://localhost", "https://localhost"]);
+const allowedOrigins = new Set([
+  ...configuredOrigins,
+  "capacitor://localhost",
+  "http://localhost",
+  "https://localhost",
+  "https://crack-petal-506818-c8.web.app",
+  "https://crack-petal-506818-c8.firebaseapp.com"
+]);
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
