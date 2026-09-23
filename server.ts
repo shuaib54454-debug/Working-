@@ -89,7 +89,6 @@ async function verifyPassportScanAuth(req, res, next) {
     const decoded = await auth.verifyIdToken(idToken, hasServiceAccount);
     const email = typeof decoded.email === "string" ? decoded.email.trim().toLowerCase() : "";
     if (!email || email !== OWNER_EMAIL) return res.status(403).json({ success: false, error: "Owner account required" });
-    req.user = decoded;
     return next();
   } catch (error) {
     return res.status(401).json({ success: false, error: "Invalid token" });
