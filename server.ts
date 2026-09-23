@@ -14,10 +14,10 @@ const app = express();
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const OWNER_EMAIL = String(process.env.OWNER_EMAIL || "shuaib54454@gmail.com").trim().toLowerCase();
 
-let firebaseConfig = {};
+type FirebaseAppletConfig = {\n  projectId?: string;\n  allowedProjectIds?: string[];\n};\n\nlet firebaseConfig: FirebaseAppletConfig = {};
 try {
   if (existsSync(configPath)) {
-    firebaseConfig = JSON.parse(readFileSync(configPath, "utf-8"));
+    firebaseConfig = JSON.parse(readFileSync(configPath, "utf-8")) as FirebaseAppletConfig;
   }
 } catch (error) {
   console.error("Failed to load Firebase config:", error instanceof Error ? error.message : "unknown error");
