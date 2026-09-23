@@ -116,6 +116,12 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "12mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
+// Render/Firebase deployment health endpoint. Keep this before the production SPA fallback
+// so /api/health always returns JSON instead of index.html.
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 app.post("/api/scan-passport", verifyPassportScanAuth, async (req, res) => {
   try {
     const { imageBase64, mimeType = "image/jpeg" } = req.body || {};
