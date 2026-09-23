@@ -14,7 +14,12 @@ const app = express();
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const OWNER_EMAIL = String(process.env.OWNER_EMAIL || "shuaib54454@gmail.com").trim().toLowerCase();
 
-type FirebaseAppletConfig = {\n  projectId?: string;\n  allowedProjectIds?: string[];\n};\n\nlet firebaseConfig: FirebaseAppletConfig = {};
+type FirebaseAppletConfig = {
+  projectId?: string;
+  allowedProjectIds?: string[];
+};
+
+let firebaseConfig: FirebaseAppletConfig = {};
 try {
   if (existsSync(configPath)) {
     firebaseConfig = JSON.parse(readFileSync(configPath, "utf-8")) as FirebaseAppletConfig;
